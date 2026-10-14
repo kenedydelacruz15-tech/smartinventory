@@ -1,709 +1,230 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../services/api";
 
 export default function OwnerDashboard() {
   const [setup, setSetup] = useState(null);
   const [summary, setSummary] = useState(null);
-
   const [categoryStock, setCategoryStock] = useState([]);
   const [inventoryStatus, setInventoryStatus] = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
-  
-
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const [loadingSetup, setLoadingSetup] = useState(true);
-  const [loadingSummary, setLoadingSummary] = useState(true);
-  const [loadingCharts, setLoadingCharts] = useState(true);
-
   const [error, setError] = useState("");
-  
-
-  
 
   useEffect(() => {
     loadDashboard();
   }, []);
 
   const loadDashboard = async () => {
-    await Promise.all([
-      loadSetupStatus(),
-      loadSummary(),
-      loadCharts()
-    ]);
-  };
-
-  // Load store setup status
-  const loadSetupStatus = async () => {
     try {
-      const res = await api.get(
-        "/api/store/setup-status"
-      );
-
-      setSetup(res.data);
-    } catch (error) {
-      console.error(
-        "Could not load setup status:",
-        error
-      );
-
-      setSetup({
-        setup_complete: false
-      });
-    } finally {
-      setLoadingSetup(false);
-    }
-  };
-
-  // Load dashboard summary
-  const loadSummary = async () => {
-    try {
+      setLoading(true);
       setError("");
 
-      const res = await api.get(
-        "/api/dashboard/summary"
-      );
+      const [setupRes, summaryRes, categoryRes, statusRes, movementRes] =
+        await Promise.all([
+          api.get("/api/store/setup-status"),
+          api.get("/api/dashboard/summary"),
+          api.get("/api/dashboard/charts/category-stock"),
+          api.get("/api/dashboard/charts/inventory-status"),
+          api.get("/api/dashboard/charts/stock-movements?days=7")
+        ]);
 
-      setSummary(res.data);
-    } catch (error) {
-      console.error(
-        "Could not load dashboard summary:",
-        error
-      );
-
-      setError(
-        error.response?.data?.error ||
-        "Could not load dashboard data."
-      );
-    } finally {
-      setLoadingSummary(false);
-    }
-  };
-
-  // Load dashboard charts
-  const loadCharts = async () => {
-    try {
-      setLoadingCharts(true);
-
-      const [
-        categoryRes,
-        statusRes,
-        movementRes
-      ] = await Promise.all([
-        api.get("/api/dashboard/charts/category-stock"),
-        api.get("/api/dashboard/charts/inventory-status"),
-        api.get("/api/dashboard/charts/stock-movements?days=7")
-      ]);
-
+      setSetup(setupRes.data || {});
+      setSummary(summaryRes.data || {});
       setCategoryStock(categoryRes.data?.data || []);
       setInventoryStatus(statusRes.data?.data || []);
       setStockMovements(movementRes.data?.data || []);
-
-    } catch (error) {
-      console.error(
-        "Could not load dashboard charts:",
-        error
-      );
-
-      console.error(
-        error.response?.data?.error ||
-        "Could not load dashboard charts."
-      );
+    } catch (err) {
+      console.error("Could not load dashboard:", err);
+      setError(err.response?.data?.error || "Could not load dashboard data.");
     } finally {
-      setLoadingCharts(false);
+      setLoading(false);
     }
   };
 
-
-  // Get inventory status count
-  const getStatusCount = (status) => {
-    const item = inventoryStatus.find(
-      (entry) =>
-        entry.stock_status === status
-    );
-
-    return Number(
-      item?.product_count || 0
-    );
+  const statusCount = (status) => {
+    const item = inventoryStatus.find((row) => row.stock_status === status);
+    return Number(item?.product_count || 0);
   };
 
-  // Get movement quantity
-  const getMovementQuantity = (type) => {
-    const item = stockMovements.find(
-      (entry) =>
-        entry.movement_type === type
-    );
-
-    return Number(
-      item?.total_quantity || 0
-    );
+  const movementCount = (type) => {
+    const item = stockMovements.find((row) => row.movement_type === type);
+    return Number(item?.total_quantity || 0);
   };
+
+  const categoryTotal = useMemo(
+    () => categoryStock.reduce((total, item) => total + Number(item.total_stock || 0), 0),
+    [categoryStock]
+  );
+
+  const topCategories = [...categoryStock]
+    .sort((a, b) => Number(b.total_stock || 0) - Number(a.total_stock || 0))
+    .slice(0, 5);
 
   return (
-    <div>
-
-      {/* HEADER */}
-
-      <div className="page-header">
-
+    <div className="inventory-dashboard">
+      <div className="dashboard-top-row">
         <div>
-
-          <h1>
-            Owner Dashboard
-          </h1>
-
-          <p className="muted">
-            Overview of your store's inventory and products.
-          </p>
-
+          <div className="dashboard-breadcrumb">STORE / CONTROL PANEL</div>
+          <h1>Dashboard</h1>
+          <p>Monitor your motorcycle parts inventory and daily store operations.</p>
         </div>
 
-        <button
-          type="button"
-          onClick={loadDashboard}
-          disabled={refreshing}
-        >
-          {refreshing ? "Refreshing..." : "Refresh Dashboard"}
+        <button className="dashboard-refresh" onClick={loadDashboard} disabled={loading}>
+          <i className="bi bi-arrow-clockwise" /> {loading ? "Refreshing..." : "Refresh"}
         </button>
-
       </div>
 
+      {!loading && setup?.setup_complete === false && (
+        <div className="dashboard-warning">
+          <div className="dashboard-warning-icon"><i className="bi bi-exclamation-triangle-fill" /></div>
+          <div>
+            <strong>Store setup is incomplete</strong>
+            <span>Complete your store information before starting normal operations.</span>
+          </div>
+          <Link to="/settings/store">Complete Setup</Link>
+        </div>
+      )}
 
-      {/* SETUP STATUS */}
+      {error && <div className="dashboard-error"><i className="bi bi-exclamation-circle" /> {error}</div>}
 
-      {!loadingSetup && (
+      <div className="dashboard-kpi-grid">
+        <div className="dashboard-kpi green">
+          <span><i className="bi bi-box-seam" /> Products</span>
+          <strong>{loading ? "..." : summary?.total_products ?? 0}</strong>
+          <small>Active products</small>
+        </div>
+        <div className="dashboard-kpi blue">
+          <span><i className="bi bi-stack" /> Inventory</span>
+          <strong>{loading ? "..." : summary?.total_stock ?? 0}</strong>
+          <small>Total units in stock</small>
+        </div>
+        <div className="dashboard-kpi orange">
+          <span><i className="bi bi-exclamation-circle" /> Low Stock</span>
+          <strong>{loading ? "..." : summary?.inventory?.low_stock ?? 0}</strong>
+          <small>Needs attention</small>
+        </div>
+        <div className="dashboard-kpi red">
+          <span><i className="bi bi-x-octagon" /> Out of Stock</span>
+          <strong>{loading ? "..." : summary?.inventory?.out_of_stock ?? 0}</strong>
+          <small>Zero stock products</small>
+        </div>
+        <div className="dashboard-kpi purple">
+          <span><i className="bi bi-bell" /> Alerts</span>
+          <strong>{loading ? "..." : summary?.unread_alerts ?? 0}</strong>
+          <small>Items needing action</small>
+        </div>
+        <div className="dashboard-kpi cyan">
+          <span><i className="bi bi-box-arrow-in-down" /> Stock In</span>
+          <strong>{loading ? "..." : movementCount("STOCK_IN")}</strong>
+          <small>Units added · 7 days</small>
+        </div>
+        <div className="dashboard-kpi teal">
+          <span><i className="bi bi-box-arrow-up" /> Stock Out</span>
+          <strong>{loading ? "..." : movementCount("STOCK_OUT")}</strong>
+          <small>Units removed · 7 days</small>
+        </div>
+        <div className="dashboard-kpi dark">
+          <span><i className="bi bi-grid" /> Categories</span>
+          <strong>{loading ? "..." : categoryStock.length}</strong>
+          <small>{categoryTotal.toLocaleString()} units grouped</small>
+        </div>
+      </div>
 
-        <div
-          className={
-            setup?.setup_complete
-              ? "success"
-              : "alert"
-          }
-        >
+      <div className="dashboard-panel-heading">
+        <div>
+          <h2>Inventory Overview</h2>
+          <span>Current stock health and recent movement.</span>
+        </div>
+        <Link to="/inventory">View Inventory <i className="bi bi-arrow-right" /></Link>
+      </div>
 
-          <strong>
+      <div className="dashboard-main-grid">
+        <div className="dashboard-panel">
+          <div className="dashboard-panel-title">
+            <div><i className="bi bi-bar-chart-fill" /><strong>Stock Movement</strong></div>
+            <span>Last 7 days</span>
+          </div>
 
-            {setup?.setup_complete
-              ? "✓ Store Setup Complete"
-              : "Store Setup Incomplete"}
+          <div className="movement-visual">
+            <div className="movement-column">
+              <div className="movement-bar in" style={{ height: `${Math.max(14, Math.min(100, movementCount("STOCK_IN") / Math.max(movementCount("STOCK_IN"), movementCount("STOCK_OUT"), 1) * 100))}%` }} />
+              <strong>{movementCount("STOCK_IN").toLocaleString()}</strong>
+              <small>Stock In</small>
+            </div>
+            <div className="movement-column">
+              <div className="movement-bar out" style={{ height: `${Math.max(14, Math.min(100, movementCount("STOCK_OUT") / Math.max(movementCount("STOCK_IN"), movementCount("STOCK_OUT"), 1) * 100))}%` }} />
+              <strong>{movementCount("STOCK_OUT").toLocaleString()}</strong>
+              <small>Stock Out</small>
+            </div>
+            <div className="movement-summary">
+              <span>Net movement</span>
+              <strong>{(movementCount("STOCK_IN") - movementCount("STOCK_OUT")).toLocaleString()} units</strong>
+              <small>Based on recorded stock movements</small>
+            </div>
+          </div>
+        </div>
 
-          </strong>
+        <div className="dashboard-panel">
+          <div className="dashboard-panel-title">
+            <div><i className="bi bi-pie-chart-fill" /><strong>Inventory Status</strong></div>
+            <span>{loading ? "Loading..." : `${summary?.total_products ?? 0} products`}</span>
+          </div>
 
-          <p>
+          <div className="status-dashboard-grid">
+            <div className="status-dashboard-item good"><span>In Stock</span><strong>{statusCount("IN_STOCK")}</strong></div>
+            <div className="status-dashboard-item warning"><span>Low Stock</span><strong>{statusCount("LOW_STOCK")}</strong></div>
+            <div className="status-dashboard-item danger"><span>Out of Stock</span><strong>{statusCount("OUT_OF_STOCK")}</strong></div>
+          </div>
+        </div>
+      </div>
 
-            {setup?.setup_complete
-              ? "Your store is ready for normal operations."
-              : "Complete your store information before starting normal operations."}
+      <div className="dashboard-two-column">
+        <div className="dashboard-panel dashboard-table-panel">
+          <div className="dashboard-panel-title">
+            <div><i className="bi bi-trophy-fill" /><strong>Top Stock Categories</strong></div>
+            <span>Current units</span>
+          </div>
 
-          </p>
-
-          {!setup?.setup_complete && (
-
-            <Link to="/settings/store">
-              Complete Store Setup
-            </Link>
-
+          {topCategories.length === 0 ? (
+            <div className="dashboard-empty">No category stock data available.</div>
+          ) : (
+            <table className="dashboard-table">
+              <thead><tr><th>Category</th><th>Units in Stock</th><th>Share</th></tr></thead>
+              <tbody>
+                {topCategories.map((item, index) => {
+                  const units = Number(item.total_stock || 0);
+                  const share = categoryTotal ? Math.round((units / categoryTotal) * 100) : 0;
+                  return (
+                    <tr key={`${item.category_name}-${index}`}>
+                      <td><strong>{item.category_name}</strong></td>
+                      <td>{units.toLocaleString()}</td>
+                      <td><div className="share-cell"><div><span style={{ width: `${share}%` }} /></div><b>{share}%</b></div></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
-
         </div>
 
-      )}
-
-
-      {/* DASHBOARD ERROR */}
-
-      {error && (
-
-        <div className="alert">
-
-          <strong>
-            Dashboard Error
-          </strong>
-
-          <p>
-            {error}
-          </p>
-
+        <div className="dashboard-panel dashboard-table-panel">
+          <div className="dashboard-panel-title">
+            <div><i className="bi bi-lightning-fill" /><strong>Quick Actions</strong></div>
+            <span>Store operations</span>
+          </div>
+          <div className="dashboard-actions">
+            <Link to="/products" className="dashboard-action green"><i className="bi bi-plus-square" /><span><strong>Add Product</strong><small>Create a new motorcycle part</small></span><i className="bi bi-chevron-right" /></Link>
+            <Link to="/inventory" className="dashboard-action blue"><i className="bi bi-boxes" /><span><strong>Manage Inventory</strong><small>Stock in, stock out and adjust</small></span><i className="bi bi-chevron-right" /></Link>
+            <Link to="/categories" className="dashboard-action orange"><i className="bi bi-grid" /><span><strong>Categories</strong><small>Organize your products</small></span><i className="bi bi-chevron-right" /></Link>
+            <Link to="/settings/store" className="dashboard-action purple"><i className="bi bi-gear" /><span><strong>Store Settings</strong><small>Update store information</small></span><i className="bi bi-chevron-right" /></Link>
+          </div>
         </div>
-
-      )}
-
-
-      {/* STAT CARDS */}
-
-      <div className="dashboard-stats">
-
-        <div className="stat-card">
-
-          <span className="stat-label">
-            Products
-          </span>
-
-          <strong>
-            {loadingSummary
-              ? "..."
-              : summary?.total_products ?? 0}
-          </strong>
-
-          <small>
-            Products in your store
-          </small>
-
-        </div>
-
-
-        <div className="stat-card">
-
-          <span className="stat-label">
-            Inventory
-          </span>
-
-          <strong>
-            {loadingSummary
-              ? "..."
-              : summary?.total_stock ?? 0}
-          </strong>
-
-          <small>
-            Total units in stock
-          </small>
-
-        </div>
-
-
-        <div className="stat-card">
-
-          <span className="stat-label">
-            Low Stock
-          </span>
-
-          <strong>
-            {loadingSummary
-              ? "..."
-              : summary?.inventory?.low_stock ?? 0}
-          </strong>
-
-          <small>
-            Items requiring attention
-          </small>
-
-        </div>
-
       </div>
 
-
-      {/* ADDITIONAL STATS */}
-
-      <div className="dashboard-stats">
-
-        <div className="stat-card">
-
-          <span className="stat-label">
-            Out of Stock
-          </span>
-
-          <strong>
-            {loadingSummary
-              ? "..."
-              : summary?.inventory?.out_of_stock ?? 0}
-          </strong>
-
-          <small>
-            Products with no stock
-          </small>
-
-        </div>
-
-
-        <div className="stat-card">
-
-          <span className="stat-label">
-            Alerts
-          </span>
-
-          <strong>
-            {loadingSummary
-              ? "..."
-              : summary?.unread_alerts ?? 0}
-          </strong>
-
-          <small>
-            Store alerts
-          </small>
-
-        </div>
-
+      <div className="dashboard-footer-note">
+        <i className="bi bi-info-circle" /> Dashboard values are based on the current store records and recorded inventory movements.
       </div>
-
-
-      {/* INVENTORY ALERTS */}
-
-      <div className="dashboard-section">
-
-        <div className="section-header">
-
-          <div>
-
-            <h2>
-              Inventory Alerts
-            </h2>
-
-            <p className="muted">
-              Items that may require attention.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="dashboard-grid">
-
-          <div className="module-card">
-
-            <strong>
-              Expiring Soon
-            </strong>
-
-            <span>
-              {loadingSummary
-                ? "Loading..."
-                : `${summary?.expiration?.expiring_soon ?? 0} product(s) expiring within 7 days`}
-            </span>
-
-          </div>
-
-
-          <div className="module-card">
-
-            <strong>
-              Expired
-            </strong>
-
-            <span>
-              {loadingSummary
-                ? "Loading..."
-                : `${summary?.expiration?.expired ?? 0} product(s) already expired`}
-            </span>
-
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* STOCK BY CATEGORY */}
-
-      <div className="dashboard-section">
-
-        <div className="section-header">
-
-          <div>
-
-            <h2>
-              Stock by Category
-            </h2>
-
-            <p className="muted">
-              Current inventory grouped by category.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        {loadingCharts ? (
-
-          <div className="module-card">
-            Loading category data...
-          </div>
-
-        ) : categoryStock.length === 0 ? (
-
-          <div className="module-card">
-            No category stock data available.
-          </div>
-
-        ) : (
-
-          <div className="dashboard-grid">
-
-            {categoryStock.map((item, index) => (
-
-              <div
-                className="module-card"
-                key={`${item.category_name}-${index}`}
-              >
-
-                <strong>
-                  {item.category_name}
-                </strong>
-
-                <span>
-                  {Number(
-                    item.total_stock || 0
-                  ).toLocaleString()} units
-                </span>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        )}
-
-      </div>
-
-
-      {/* INVENTORY STATUS */}
-
-      <div className="dashboard-section">
-
-        <div className="section-header">
-
-          <div>
-
-            <h2>
-              Inventory Status
-            </h2>
-
-            <p className="muted">
-              Current product stock status.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="dashboard-stats">
-
-          <div className="stat-card">
-
-            <span className="stat-label">
-              In Stock
-            </span>
-
-            <strong>
-              {loadingCharts
-                ? "..."
-                : getStatusCount("IN_STOCK")}
-            </strong>
-
-          </div>
-
-
-          <div className="stat-card">
-
-            <span className="stat-label">
-              Low Stock
-            </span>
-
-            <strong>
-              {loadingCharts
-                ? "..."
-                : getStatusCount("LOW_STOCK")}
-            </strong>
-
-          </div>
-
-
-          <div className="stat-card">
-
-            <span className="stat-label">
-              Out of Stock
-            </span>
-
-            <strong>
-              {loadingCharts
-                ? "..."
-                : getStatusCount("OUT_OF_STOCK")}
-            </strong>
-
-          </div>
-
-        </div>
-
-      </div>
-
-
-      {/* STOCK MOVEMENTS */}
-
-      <div className="dashboard-section">
-
-        <div className="section-header">
-
-          <div>
-
-            <h2>
-              Stock Movements
-            </h2>
-
-            <p className="muted">
-              Stock movement totals during the last 7 days.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="dashboard-stats">
-
-          <div className="stat-card">
-
-            <span className="stat-label">
-              Stock In
-            </span>
-
-            <strong>
-              {loadingCharts
-                ? "..."
-                : getMovementQuantity("STOCK_IN")}
-            </strong>
-
-            <small>
-              Units added
-            </small>
-
-          </div>
-
-
-          <div className="stat-card">
-
-            <span className="stat-label">
-              Stock Out
-            </span>
-
-            <strong>
-              {loadingCharts
-                ? "..."
-                : getMovementQuantity("STOCK_OUT")}
-            </strong>
-
-            <small>
-              Units removed
-            </small>
-
-          </div>
-        </div>
-
-      </div>
-
-
-      {/* STORE OVERVIEW */}
-
-      <div className="dashboard-section">
-
-        <div className="section-header">
-
-          <div>
-
-            <h2>
-              Store Overview
-            </h2>
-
-            <p className="muted">
-              Manage your daily store operations
-              from here.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="dashboard-grid">
-
-          <Link
-            className="module-card"
-            to="/inventory"
-          >
-            <strong>
-              Inventory
-            </strong>
-
-            <span>
-              Check current stock and inventory records.
-            </span>
-          </Link>
-
-
-          <Link
-            className="module-card"
-            to="/products"
-          >
-            <strong>
-              Products
-            </strong>
-
-            <span>
-              Create, update and manage motorcycle parts.
-            </span>
-          </Link>
-
-
-          <Link
-            className="module-card"
-            to="/categories"
-          >
-            <strong>
-              Categories
-            </strong>
-
-            <span>
-              Organize products into store categories.
-            </span>
-          </Link>
-
-        </div>
-
-      </div>
-
-
-      {/* QUICK ACTIONS */}
-
-      <div className="dashboard-section">
-
-        <div className="section-header">
-
-          <div>
-
-            <h2>
-              Quick Actions
-            </h2>
-
-            <p className="muted">
-              Frequently used store management functions.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="quick-actions">
-
-          <Link to="/products">
-            Add Product
-          </Link>
-
-          <Link to="/categories">
-            Add Category
-          </Link>
-
-          <Link to="/settings/store">
-            Store Settings
-          </Link>
-
-        </div>
-
-      </div>
-
     </div>
   );
 }

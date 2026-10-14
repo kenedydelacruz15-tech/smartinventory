@@ -5,7 +5,6 @@ import { getDashboardPath, saveAuth } from "../services/auth";
 
 export default function Login() {
   const navigate = useNavigate();
-
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -14,109 +13,47 @@ export default function Login() {
   const submit = async (e) => {
     e.preventDefault();
     setError("");
-
-    if (!username.trim() || !password) {
-      setError("Username and password are required.");
-      return;
-    }
-
+    if (!username.trim() || !password) return setError("Enter your username and password.");
     setLoading(true);
-
     try {
-      const res = await api.post("/api/users/login", {
-        username: username.trim(),
-        password,
-      });
-
+      const res = await api.post("/api/users/login", { username: username.trim(), password });
       const user = res.data?.user;
       const token = res.data?.access_token;
-      const actualRole = String(user?.role || "").toUpperCase();
-
-      if (!user || !token) {
-        setError("Login succeeded, but the server returned incomplete authentication information.");
-        return;
-      }
-
-      if (!["ADMIN", "OWNER", "STAFF"].includes(actualRole)) {
-        setError("Your account has an invalid or unsupported role.");
-        return;
-      }
-
-      const saved = saveAuth({
-        access_token: token,
-        user: { ...user, role: actualRole },
-      });
-
-      if (!saved) {
-        setError("Login succeeded, but authentication information could not be saved.");
-        return;
-      }
-
-      navigate(getDashboardPath(actualRole), { replace: true });
+      const role = String(user?.role || "").toUpperCase();
+      if (!user || !token) throw new Error("Incomplete authentication response.");
+      if (!["ADMIN", "OWNER", "STAFF"].includes(role)) throw new Error("Unsupported account role.");
+      saveAuth({ access_token: token, user: { ...user, role } });
+      navigate(getDashboardPath(role), { replace: true });
     } catch (err) {
-      console.error("LOGIN ERROR:", err);
-
-      setError(
-        err.response?.data?.error ||
-        "Invalid username or password."
-      );
-    } finally {
-      setLoading(false);
-    }
+      setError(err.response?.data?.error || err.response?.data?.message || err.message || "Invalid username or password.");
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="role-login-page">
-      <div className="role-login-card">
-        <div className="login-heading">
-          <h1>SmartInventory</h1>
-          <p>Motorcycle Parts Inventory System</p>
+    <div className="login-page">
+      <div className="login-visual">
+        <div className="login-brand"><span className="login-brand-mark"><i className="bi bi-boxes" /></span><strong>SmartInventory</strong></div>
+        <div className="login-visual-copy">
+          <span className="eyebrow">INVENTORY MANAGEMENT</span>
+          <h1>Know your stock.<br />Run your store smarter.</h1>
+          <p>Motorcycle parts inventory, stock monitoring, and analytics in one workspace.</p>
+          <div className="login-feature-row"><span><i className="bi bi-box-seam" /> Inventory</span><span><i className="bi bi-graph-up" /> Analytics</span><span><i className="bi bi-bell" /> Alerts</span></div>
         </div>
-
-        <h3>Sign in</h3>
-        <p className="muted">Use your account credentials. The system will automatically identify whether you are an Admin, Owner, or Staff member.</p>
-
-        {error && (
-          <div className="alert">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={submit} className="login-form">
-          <label htmlFor="username">Username</label>
-          <input
-            id="username"
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            disabled={loading}
-            required
-          />
-
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            disabled={loading}
-            required
-          />
-
-          <button
-            type="submit"
-            className="primary full"
-            disabled={loading}
-          >
-            {loading ? "Signing in..." : "Login"}
-          </button>
-        </form>
-
-        <p className="muted login-role-note">
-          Your verified role determines which dashboard and features you can access.
-        </p>
+      </div>
+      <div className="login-panel">
+        <div className="login-card">
+          <div className="mobile-login-logo"><i className="bi bi-boxes" /></div>
+          <span className="eyebrow">WELCOME BACK</span>
+          <h2>Sign in</h2>
+          <p className="login-subtitle">Use your SmartInventory account.</p>
+          {error && <div className="alert alert-error"><i className="bi bi-exclamation-circle" /> {error}</div>}
+          <form onSubmit={submit} className="login-form">
+            <div className="form-field"><label htmlFor="username">Username</label><div className="input-with-icon"><i className="bi bi-person" /><input id="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" disabled={loading} required /></div></div>
+            <div className="form-field"><label htmlFor="password">Password</label><div className="input-with-icon"><i className="bi bi-lock" /><input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" disabled={loading} required /></div></div>
+            <button type="submit" className="primary full login-submit" disabled={loading}>{loading ? "Signing in..." : "Sign in"}<i className="bi bi-arrow-right" /></button>
+          </form>
+          <p className="login-footer">Your account role controls the features available to you.</p>
+        </div>
       </div>
     </div>
   );

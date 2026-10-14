@@ -246,7 +246,7 @@ export default function Inventory() {
   };
 
   return (
-    <div className="page-container">
+    <div className="page-container inventory-page">
       <div className="page-header">
         <div>
           <h1>Inventory</h1>
@@ -254,8 +254,28 @@ export default function Inventory() {
         </div>
       </div>
 
+      {/* Inventory overview */}
+      <div className="inventory-summary-grid">
+        <div className="inventory-summary-card blue">
+          <div className="inventory-summary-icon"><i className="bi bi-box-seam" /></div>
+          <div><span>Total Items</span><strong>{items.length}</strong><small>Inventory records</small></div>
+        </div>
+        <div className="inventory-summary-card green">
+          <div className="inventory-summary-icon"><i className="bi bi-check-circle" /></div>
+          <div><span>In Stock</span><strong>{items.filter((x) => Number(x.stock_quantity) > Number(x.reorder_level || 0)).length}</strong><small>Healthy stock level</small></div>
+        </div>
+        <div className="inventory-summary-card amber">
+          <div className="inventory-summary-icon"><i className="bi bi-exclamation-triangle" /></div>
+          <div><span>Needs Attention</span><strong>{items.filter((x) => Number(x.stock_quantity) > 0 && Number(x.stock_quantity) <= Number(x.reorder_level || 0)).length}</strong><small>At or below minimum stock level</small></div>
+        </div>
+        <div className="inventory-summary-card red">
+          <div className="inventory-summary-icon"><i className="bi bi-x-circle" /></div>
+          <div><span>Out of Stock</span><strong>{items.filter((x) => Number(x.stock_quantity) === 0).length}</strong><small>Requires replenishment</small></div>
+        </div>
+      </div>
+
       {/* Search */}
-      <form className="search-bar" onSubmit={handleSearch}>
+      <form className="search-bar inventory-search" onSubmit={handleSearch}>
         <input
           type="text"
           placeholder="Search product, SKU, part number, brand..."
@@ -301,7 +321,7 @@ export default function Inventory() {
               <th>Brand</th>
               <th>Category</th>
               <th>Price</th>
-              <th>Reorder Level</th>
+              <th>Min. Stock</th>
               <th>Stock</th>
               <th>Status</th>
               <th>Actions</th>

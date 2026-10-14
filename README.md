@@ -1,28 +1,83 @@
-# SmartInventory
+# SmartInventory - Final React + Axios + Flask Version
 
-SmartInventory is a Flask + React inventory management system for motorcycle parts. POS/sales functionality has been removed.
+Smart Inventory Forecasting and Analytics System for motorcycle-parts inventory.
 
-## Authentication
+## Architecture
 
-There is one login screen and one backend login endpoint: `POST /api/users/login`. Users do not choose a role before signing in. After credentials are verified, the backend returns the account role (`ADMIN`, `OWNER`, or `STAFF`) and the frontend uses that role for dashboard and route access.
+React + Vite frontend -> Axios -> Python Flask API -> MariaDB/MySQL
 
-## Main modules
+The frontend does not connect directly to the database. Existing backend routes and the existing `smart_inventory` database remain the source of truth.
 
-- Admin: store and user administration
-- Owner: products, categories, inventory, staff, and store settings
-- Staff: inventory operations
-- Inventory reports and stock movement tracking
+## Frontend
 
-## Removed
+Location: `frontend/`
 
-The POS/sales transaction feature and its dependent sales analytics/forecasting modules have been removed, including the `sales` and `sale_items` database tables, POS page, sales API routes, sales dashboard charts, sales history report, and sales-dependent analytics/forecasting services.
+```text
+frontend/src/
+  App.jsx
+  main.jsx
+  styles.css
+  pages/
+  services/
+    api.js        # Axios client + JWT interceptor
+    auth.js
+```
 
-## Setup
+Axios automatically attaches the JWT from `localStorage` to API requests.
 
-1. Create a MySQL database and import `smartinventory.sql`.
-2. Copy `.env.example` to `.env` and set the database credentials and a strong JWT secret.
-3. Install backend dependencies: `pip install -r requirements.txt`.
-4. Start Flask: `python app.py`.
-5. In `frontend/`, run `npm install` and then `npm run dev`.
+## Backend
 
-The frontend expects Flask at `http://127.0.0.1:5000` by default; change `frontend/.env` if needed.
+Run from the project root:
+
+```powershell
+python app.py
+```
+
+Default API address:
+
+```text
+http://127.0.0.1:5000
+```
+
+## Frontend
+
+Open a second terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:5173/login
+```
+
+## Environment
+
+Copy `.env.example` to `.env` in the project root and fill in your existing database credentials and private secrets.
+
+Do not commit `.env` to Git.
+
+Example:
+
+```env
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=smart_inventory
+SECRET_KEY=your-private-secret
+JWT_SECRET_KEY=your-private-jwt-secret
+AUTOPARTS_API_KEY=
+```
+
+## Important
+
+- Do not import the SQL file again if your existing `smart_inventory` database is already populated.
+- Do not put database credentials in React.
+- Keep `.env` only in the backend/project root.
+- The frontend uses Axios for API communication.
+- The logout control is icon-only in the sidebar as requested for the presentation design.

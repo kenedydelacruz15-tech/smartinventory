@@ -11,7 +11,7 @@ const emptyForm = {
   barcode: "",
   category_id: "",
   selling_price: "",
-  reorder_level: "10",
+  reorder_level: "",
   description: "",
   image_url: "",
 };
@@ -398,7 +398,7 @@ export default function Products() {
       form.reorder_level === "" ||
       Number(form.reorder_level) < 0
     ) {
-      setError("Please enter a valid reorder level.");
+      setError("Please enter a valid minimum stock level.");
       return;
     }
 
@@ -524,7 +524,7 @@ export default function Products() {
         product.reorder_level !== null &&
         product.reorder_level !== undefined
           ? String(product.reorder_level)
-          : "10",
+          : "",
 
       description:
         product.description || "",
@@ -977,7 +977,7 @@ export default function Products() {
                     brand: existing.brand || "",
                     category_id: existing.category_id || "",
                     selling_price: existing.selling_price ?? "",
-                    reorder_level: existing.reorder_level ?? "10",
+                    reorder_level: existing.reorder_level ?? "",
                     description: existing.description || "",
                   }));
                   setEditingId(existing.product_id);
@@ -1365,12 +1365,12 @@ export default function Products() {
           {/* REORDER LEVEL */}
 
           <div className="form-field">
-            <label>Reorder Level</label>
+            <label>Minimum Stock Level (Units)</label>
 
             <input
               type="number"
               name="reorder_level"
-              placeholder="10"
+              placeholder="Enter minimum stock units"
               value={form.reorder_level}
               onChange={handleChange}
               min="0"
@@ -1378,6 +1378,7 @@ export default function Products() {
               disabled={loading}
               required
             />
+            <small className="field-help">Minimum quantity to keep available before the inventory status becomes Needs Attention.</small>
           </div>
 
           {/* DESCRIPTION */}
@@ -1528,7 +1529,7 @@ export default function Products() {
                 <th>Brand</th>
                 <th>Category</th>
                 <th>Price</th>
-                <th>Reorder</th>
+                <th>Min. Stock</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>

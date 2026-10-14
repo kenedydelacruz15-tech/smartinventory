@@ -1,20 +1,6 @@
-# Virtual environment
-venv/
-
-# Environment variables / secrets
 .env
-
-# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Pytest
-.pytest_cache/
-
-# VS Code
+*.pyc
+frontend/node_modules/
+frontend/dist/
 .vscode/
-
-# OS files
-.DS_Store
-Thumbs.db

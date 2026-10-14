@@ -36,7 +36,12 @@ CORS(app,
     supports_credentials=True
 )
 
-app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+jwt_secret = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY")
+if not jwt_secret:
+    raise RuntimeError("JWT_SECRET_KEY or SECRET_KEY must be set in .env")
+
+app.config["SECRET_KEY"] = jwt_secret
+app.config["JWT_SECRET_KEY"] = jwt_secret
 
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=30)
 

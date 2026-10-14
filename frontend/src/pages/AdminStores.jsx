@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
+import BackButton from "../components/BackButton";
 
 const emptyForm = {
   store_name: "",
@@ -127,14 +128,15 @@ export default function AdminStores() {
   };
 
   return (
-    <div>
+    <div className="admin-page">
+      <BackButton fallback="/admin/dashboard" label="Back to Admin Dashboard" />
       {/* Page header */}
       <div className="page-header">
         <div>
           <h1>Stores</h1>
 
           <p className="muted">
-            Create and manage registered stores.
+            Manage registered stores.
           </p>
         </div>
 
