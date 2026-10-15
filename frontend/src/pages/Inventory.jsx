@@ -1,10 +1,58 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
 
+
+function ProductThumbnail({ item }) {
+  const imageUrl =
+    item.product_image_url ||
+    item.image_url ||
+    item.product_image ||
+    item.image ||
+    item.photo_url ||
+    item.image_path;
+
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [imageUrl]);
+
+  return (
+    <div
+      className="inventory-product-thumbnail"
+      style={{
+        width: 54,
+        height: 54,
+        flex: "0 0 54px",
+        borderRadius: 10,
+        overflow: "hidden",
+        display: "grid",
+        placeItems: "center",
+        background: "var(--surface, #f1f5f9)",
+        border: "1px solid var(--line, #e2e8f0)",
+      }}
+    >
+      {imageUrl && !imageFailed ? (
+        <img
+          src={imageUrl}
+          alt={item.product_name || "Product"}
+          loading="lazy"
+          onError={() => setImageFailed(true)}
+          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+        />
+      ) : (
+        <i className="bi bi-image" aria-label="No product image" style={{ fontSize: 22, color: "var(--muted, #94a3b8)" }} />
+      )}
+    </div>
+  );
+}
+
 export default function Inventory() {
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("ALL");
 
   // Search
   const [search, setSearch] = useState("");
@@ -45,7 +93,44 @@ export default function Inventory() {
 
   useEffect(() => {
     loadInventory();
+    loadCategories();
   }, []);
+
+  // Load active categories for the inventory category browser.
+  const loadCategories = async () => {
+    try {
+      const res = await api.get("/api/categories/", {
+        params: { status: "active" },
+      });
+      setCategories(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      // If the category endpoint is unavailable, categories are derived
+      // from the inventory records below as a fallback.
+      console.error("Category load error:", err);
+    }
+  };
+
+  const categoryOptions = (() => {
+    const activeCategories = categories
+      .filter((category) => Number(category.is_active) === 1 || category.is_active === true)
+      .map((category) => category.category_name)
+      .filter(Boolean);
+
+    const inventoryCategories = items
+      .map((item) => item.category_name)
+      .filter(Boolean);
+
+    return [...new Set(activeCategories.length ? activeCategories : inventoryCategories)]
+      .sort((a, b) => a.localeCompare(b));
+  })();
+
+  const visibleItems = selectedCategory === "ALL"
+    ? items
+    : items.filter(
+        (item) =>
+          (item.category_name || "Uncategorized").toLowerCase() ===
+          selectedCategory.toLowerCase()
+      );
 
   // Search when user presses Enter
   const handleSearch = (e) => {
@@ -310,156 +395,194 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Inventory table */}
-      <div className="table-container">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>SKU</th>
-              <th>Part Number</th>
-              <th>Brand</th>
-              <th>Category</th>
-              <th>Price</th>
-              <th>Min. Stock</th>
-              <th>Stock</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
+      {/* Category browser and filtered inventory */}
+      <div
+        className="inventory-category-layout"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(190px, 240px) minmax(0, 1fr)",
+          gap: "18px",
+          alignItems: "start",
+        }}
+      >
+        <aside
+          className="inventory-category-sidebar"
+          style={{
+            border: "1px solid var(--line)",
+            borderRadius: "14px",
+            padding: "14px",
+            background: "var(--card, #fff)",
+            position: "sticky",
+            top: "16px",
+            maxHeight: "calc(100vh - 150px)",
+            overflowY: "auto",
+          }}
+        >
+          <h2 style={{ fontSize: "16px", margin: "0 0 12px" }}>Categories</h2>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory("ALL")}
+            aria-pressed={selectedCategory === "ALL"}
+            style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              width: "100%", padding: "10px", marginBottom: "6px", borderRadius: "8px",
+              border: "1px solid var(--line)", cursor: "pointer", textAlign: "left",
+              background: selectedCategory === "ALL" ? "var(--surface-hover, #e9edf3)" : "transparent",
+              borderColor: selectedCategory === "ALL" ? "var(--line-strong, #cbd5e1)" : "var(--line)",
+              color: "var(--text, #263449)",
+              fontWeight: selectedCategory === "ALL" ? 500 : 400,
+            }}
+          >
+            <span><i className="bi bi-grid" /> All Items</span>
+            <span>{items.length}</span>
+          </button>
 
-          <tbody>
-            {items.length === 0 ? (
-              <tr>
-                <td colSpan="10" className="empty-state">
-                  No inventory found.
-                </td>
-              </tr>
-            ) : (
-              items.map((item) => (
-                <tr key={item.inventory_id}>
-                  <td>
-                    <strong>{item.product_name}</strong>
-                  </td>
+          {categoryOptions.map((categoryName) => {
+            const count = items.filter(
+              (item) => (item.category_name || "Uncategorized").toLowerCase() === categoryName.toLowerCase()
+            ).length;
+            const active = selectedCategory.toLowerCase() === categoryName.toLowerCase();
 
-                  <td>
-                    {item.sku || "-"}
-                  </td>
+            return (
+              <button
+                key={categoryName}
+                type="button"
+                onClick={() => setSelectedCategory(categoryName)}
+                aria-pressed={active}
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  gap: "8px", width: "100%", padding: "10px", marginBottom: "6px",
+                  borderRadius: "8px", border: "1px solid var(--line)", cursor: "pointer",
+                  textAlign: "left", background: active ? "var(--surface-hover, #e9edf3)" : "transparent",
+                  borderColor: active ? "var(--line-strong, #cbd5e1)" : "var(--line)",
+                  color: "var(--text, #263449)",
+                  fontWeight: active ? 500 : 400,
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <i className="bi bi-folder2-open" /> {categoryName}
+                </span>
+                <span>{count}</span>
+              </button>
+            );
+          })}
 
-                  <td>
-                    {item.part_number || "-"}
-                  </td>
+          {items.some((item) => !item.category_name) && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory("Uncategorized")}
+              aria-pressed={selectedCategory === "Uncategorized"}
+              style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                width: "100%", padding: "10px", marginBottom: "6px", borderRadius: "8px",
+                border: "1px solid var(--line)", cursor: "pointer", textAlign: "left",
+                background: selectedCategory === "Uncategorized" ? "var(--surface-hover, #e9edf3)" : "transparent",
+                borderColor: selectedCategory === "Uncategorized" ? "var(--line-strong, #cbd5e1)" : "var(--line)",
+                color: "var(--text, #263449)",
+                fontWeight: selectedCategory === "Uncategorized" ? 500 : 400,
+              }}
+            >
+              <span><i className="bi bi-folder" /> Uncategorized</span>
+              <span>{items.filter((item) => !item.category_name).length}</span>
+            </button>
+          )}
+        </aside>
 
-                  <td>
-                    {item.brand || "-"}
-                  </td>
-
-                  <td>
-                    {item.category_name || "-"}
-                  </td>
-
-                  <td>
-                    ₱{Number(item.selling_price || 0).toFixed(2)}
-                  </td>
-
-                  <td>
-                    {item.reorder_level ?? 0}
-                  </td>
-
-                  <td>
-                    <strong>
-                      {item.stock_quantity}
-                    </strong>
-                  </td>
-
-                  <td>
-                    {item.is_active ? (
-                      item.stock_quantity === 0 ? (
-                        <span className="status-badge danger">
-                          Out of Stock
-                        </span>
-                      ) : item.stock_quantity <=
-                        Number(item.reorder_level || 0) ? (
-                        <span className="status-badge warning">
-                          Low Stock
-                        </span>
-                      ) : (
-                        <span className="status-badge success">
-                          In Stock
-                        </span>
-                      )
-                    ) : (
-                      <span className="status-badge">
-                        Inactive
-                      </span>
-                    )}
-                  </td>
-
-                  <td>
-                    <div className="action-buttons">
-                      {item.is_active ? (
-                        <>
-                          {/* Stock In */}
-                          <button
-                            type="button"
-                            className="btn-success"
-                            onClick={() =>
-                              openMovement(item, "STOCK_IN")
-                            }
-                          >
-                            Stock In
-                          </button>
-
-                          {/* Stock Out */}
-                          <button
-                            type="button"
-                            className="btn-warning"
-                            onClick={() =>
-                              openMovement(item, "STOCK_OUT")
-                            }
-                          >
-                            Stock Out
-                          </button>
-
-                          {/* Adjust */}
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            onClick={() => openEdit(item)}
-                          >
-                            Adjust
-                          </button>
-
-                          {/* Deactivate */}
-                          <button
-                            type="button"
-                            className="btn-danger"
-                            onClick={() =>
-                              deactivateItem(item)
-                            }
-                          >
-                            Deactivate
-                          </button>
-                        </>
-                      ) : (
-                        /* Restore */
-                        <button
-                          type="button"
-                          className="btn-primary"
-                          onClick={() =>
-                            restoreItem(item)
-                          }
-                        >
-                          Restore
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
+        <section className="inventory-category-results" style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", margin: "0 0 12px", flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: "20px" }}>
+                {selectedCategory === "ALL" ? "All Inventory Items" : selectedCategory}
+              </h2>
+              <p style={{ margin: "4px 0 0", color: "var(--muted, #64748b)", fontSize: "13px" }}>
+                Showing {visibleItems.length} {visibleItems.length === 1 ? "item" : "items"}
+              </p>
+            </div>
+            {selectedCategory !== "ALL" && (
+              <button type="button" onClick={() => setSelectedCategory("ALL")}>
+                Clear category
+              </button>
             )}
-          </tbody>
-        </table>
+          </div>
+
+          <div className="table-container">
+            <table className="data-table inventory-products-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>SKU / Part No.</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleItems.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="empty-state">
+                      {selectedCategory === "ALL"
+                        ? "No inventory found."
+                        : `No items found in ${selectedCategory}.`}
+                    </td>
+                  </tr>
+                ) : (
+                  visibleItems.map((item) => (
+                    <tr key={item.inventory_id}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 190 }}>
+                          <ProductThumbnail item={item} />
+                          <div style={{ minWidth: 0 }}>
+                            <strong style={{ display: "block", overflowWrap: "anywhere" }}>{item.product_name || "Unnamed product"}</strong>
+                            <span style={{ display: "block", marginTop: 4, color: "var(--muted, #64748b)", fontSize: 12 }}>
+                              {item.brand || item.category_name || "Motorcycle part"}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span>{item.sku || item.part_number || "-"}</span>
+                        {item.sku && item.part_number && (
+                          <small style={{ display: "block", marginTop: 4, color: "var(--muted, #64748b)" }}>Part: {item.part_number}</small>
+                        )}
+                      </td>
+                      <td>₱{Number(item.selling_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td>
+                        <strong>{item.stock_quantity ?? 0}</strong>
+                        <small style={{ display: "block", marginTop: 4, color: "var(--muted, #64748b)" }}>Min: {item.reorder_level ?? 0}</small>
+                      </td>
+                      <td>
+                        {!(item.is_active === true || Number(item.is_active) === 1) ? (
+                          <span className="status-badge">Inactive</span>
+                        ) : Number(item.stock_quantity) <= 0 ? (
+                          <span className="status-badge danger">Out of Stock</span>
+                        ) : Number(item.stock_quantity) <= Number(item.reorder_level || 0) ? (
+                          <span className="status-badge warning">Low Stock</span>
+                        ) : (
+                          <span className="status-badge success">In Stock</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="action-buttons">
+                          {(item.is_active === true || Number(item.is_active) === 1) ? (
+                            <>
+                              <button type="button" className="btn-success" onClick={() => openMovement(item, "STOCK_IN")}>Stock In</button>
+                              <button type="button" className="btn-warning" onClick={() => openMovement(item, "STOCK_OUT")}>Stock Out</button>
+                              <button type="button" className="btn-primary" onClick={() => openEdit(item)}>Adjust</button>
+                              <button type="button" className="btn-danger" onClick={() => deactivateItem(item)}>Deactivate</button>
+                            </>
+                          ) : (
+                            <button type="button" className="btn-primary" onClick={() => restoreItem(item)}>Restore</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       {/* ============================= */}
