@@ -45,6 +45,13 @@ export default function AdminStores() {
     }
   };
 
+  const permanentlyDeleteStore = async (store) => {
+    const confirmed = window.confirm(`Permanently delete "${store.store_name}"? This cannot be undone. The API will block deletion while the store still has users, categories, products, or inventory.`);
+    if (!confirmed) return;
+    try { setError(""); setMessage(""); await api.delete(`/api/store/${store.store_id}/permanent`); setMessage("Store permanently deleted."); await loadStores(); }
+    catch (err) { setError(err.response?.data?.error || "Could not permanently delete store."); }
+  };
+
   const openCreateForm = () => {
     setEditingStore(null);
     setForm(emptyForm);
@@ -378,6 +385,7 @@ export default function AdminStores() {
                         >
                           Edit
                         </button>
+                        <button className="action-button deactivate-button" onClick={() => permanentlyDeleteStore(store)}>Permanently Delete</button>
                       </div>
                     </td>
                   </tr>

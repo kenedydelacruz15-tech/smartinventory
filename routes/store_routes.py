@@ -135,6 +135,11 @@ def create_store():
         db.commit()
 
         store_id = cursor.lastrowid
+        try:
+            from audit_logger import create_audit_log
+            create_audit_log(store_id, "STORE_CREATED", "STORE", store_id, f"Created store: {store_name}", int(get_jwt().get("user_id") or 0) or None, new_data={"store_name": store_name, "store_address": store_address, "store_contact": store_contact})
+        except Exception as audit_error:
+            print("STORE CREATE AUDIT ERROR:", audit_error)
 
         return jsonify({
             "message": "Store created successfully.",
@@ -444,3 +449,34 @@ def setup_status():
     finally:
         cursor.close()
         db.close()
+
+# PERMANENT DELETE STORE (ADMIN ONLY)
+@store_bp.route("/api/store/<int:store_id>/permanent", methods=["DELETE"])
+@jwt_required()
+def permanently_delete_store(store_id):
+    if not admin_only():
+        return jsonify({"error": "Only Admin can permanently delete stores."}), 403
+    db = get_db_connection(); cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT store_id, store_name FROM stores WHERE store_id=%s", (store_id,))
+        store = cursor.fetchone()
+        if not store: return jsonify({"error": "Store not found."}), 404
+        # Avoid orphaned business records: delete the store only when it is empty.
+        checks = [("users", "users"), ("categories", "categories"), ("products", "products"), ("inventory", "inventory")]
+        counts = {}
+        for table, label in checks:
+            cursor.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE store_id=%s", (store_id,))
+            counts[label] = cursor.fetchone()["n"]
+        occupied = [name for name, count in counts.items() if count]
+        if occupied:
+            return jsonify({"error": "This store still contains " + ", ".join(occupied) + ". Remove or reassign those records first."}), 409
+        from audit_logger import create_audit_log
+        create_audit_log(store_id, "STORE_PERMANENTLY_DELETED", "STORE", store_id, f"Permanently deleted store: {store['store_name']}", int(get_jwt().get("user_id") or 0) or None, old_data=store)
+        cursor.execute("DELETE FROM stores WHERE store_id=%s", (store_id,))
+        db.commit()
+        return jsonify({"message": "Store permanently deleted."}), 200
+    except Exception as e:
+        db.rollback(); print("PERMANENT STORE DELETE ERROR:", e)
+        return jsonify({"error": "Could not permanently delete store. Check related records and database constraints."}), 500
+    finally:
+        cursor.close(); db.close()

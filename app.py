@@ -28,6 +28,7 @@ from routes.dashboard_routes import dashboard_bp
 from routes.purchase_order_routes import purchase_order_bp
 from routes.user_routes import user_bp
 from routes.store_routes import store_bp
+from routes.audit_routes import audit_bp
 
 app = Flask(__name__)
 
@@ -79,6 +80,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(purchase_order_bp)
 
 app.register_blueprint(store_bp)
+app.register_blueprint(audit_bp)
 
 
 @app.route("/")

@@ -20,6 +20,7 @@ import AdminUsers from "./pages/AdminUsers";
 import AdminStores from "./pages/AdminStores";
 import StaffManagement from "./pages/StaffManagement";
 import AdminSettings from "./pages/AdminSettings";
+import AuditLogs from "./pages/AuditLogs";
 import Analytics from "./pages/Analytics";
 import LandingPage from "./pages/LandingPage";
 
@@ -55,6 +56,7 @@ const navItems = {
     ["Stores", "/admin/stores", "bi-shop"],
     ["Users", "/admin/users", "bi-people"],
     ["System Settings", "/admin/settings", "bi-gear"],
+    ["Audit Logs", "/admin/audit-logs", "bi-clipboard-data"],
   ],
 
   OWNER: [
@@ -64,13 +66,15 @@ const navItems = {
     ["Categories", "/categories", "bi-grid"],
     ["Staff", "/staff", "bi-person-badge"],
     ["Analytics", "/analytics", "bi-bar-chart-line"],
+    ["Audit Logs", "/owner/audit-logs", "bi-clipboard-data"],
     ["Store Settings", "/settings/store", "bi-gear"],
   ],
 
   STAFF: [
     ["Dashboard", "/staff/dashboard", "bi-speedometer2"],
     ["Inventory", "/inventory", "bi-box-seam"],
-    ["Analytics", "/analytics", "bi-bar-chart-line"],
+    ["Categories", "/categories", "bi-grid"],
+    ["Products", "/products", "bi-bag"],
   ],
 };
 
@@ -293,7 +297,7 @@ function Layout() {
             <Route
               path="/categories"
               element={
-                <Protected roles={["OWNER"]}>
+                <Protected roles={["OWNER", "STAFF"]}>
                   <Categories />
                 </Protected>
               }
@@ -302,7 +306,7 @@ function Layout() {
             <Route
               path="/products"
               element={
-                <Protected roles={["OWNER"]}>
+                <Protected roles={["OWNER", "STAFF"]}>
                   <Products />
                 </Protected>
               }
@@ -329,7 +333,7 @@ function Layout() {
             <Route
               path="/analytics"
               element={
-                <Protected roles={["OWNER", "STAFF"]}>
+                <Protected roles={["OWNER"]}>
                   <Analytics />
                 </Protected>
               }
@@ -352,6 +356,9 @@ function Layout() {
                 </Protected>
               }
             />
+
+            <Route path="/admin/audit-logs" element={<Protected roles={["ADMIN"]}><AuditLogs /></Protected>} />
+            <Route path="/owner/audit-logs" element={<Protected roles={["OWNER"]}><AuditLogs /></Protected>} />
 
             <Route
               path="/admin/settings"

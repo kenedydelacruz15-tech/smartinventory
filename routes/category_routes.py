@@ -1,7 +1,8 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from database import get_db_connection
+from audit_logger import create_audit_log
 from routes.user_routes import role_required
 
 
@@ -231,6 +232,10 @@ def create_category():
             store_id
         ))
 
+        category_id = cursor.lastrowid
+        create_audit_log(store_id, "CATEGORY_ADDED", "CATEGORY", category_id,
+                         f"Added category: {category_name}", get_jwt_identity() or None,
+                         new_data={"category_name": category_name, "description": description})
         connection.commit()
 
         return jsonify({
@@ -337,6 +342,9 @@ def update_category(category_id):
             store_id
         ))
 
+        create_audit_log(store_id, "CATEGORY_EDITED", "CATEGORY", category_id,
+                         f"Edited category: {category_name}", get_jwt_identity() or None,
+                         new_data={"category_name": category_name, "description": description})
         connection.commit()
 
         return jsonify({
@@ -412,6 +420,9 @@ def deactivate_category(category_id):
             store_id
         ))
 
+        create_audit_log(store_id, "CATEGORY_DEACTIVATED", "CATEGORY", category_id,
+                         f"Deactivated category: {category.get('category_name')}", get_jwt_identity() or None,
+                         old_data=category, new_data={"is_active": 0})
         connection.commit()
 
         return jsonify({
@@ -487,6 +498,9 @@ def restore_category(category_id):
             store_id
         ))
 
+        create_audit_log(store_id, "CATEGORY_RESTORED", "CATEGORY", category_id,
+                         f"Restored category: {category.get('category_name')}", get_jwt_identity() or None,
+                         new_data={"is_active": 1})
         connection.commit()
 
         return jsonify({

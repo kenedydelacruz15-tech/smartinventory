@@ -1698,58 +1698,9 @@ export default function Products() {
                           Edit
                         </button>
 
-                        {/* COMPATIBILITY */}
+                        {/* Status and vehicle compatibility are managed in Inventory. */}
 
-                        <button
-                          type="button"
-                          className="action-button"
-                          onClick={() => openCompatibility(product)}
-                          disabled={loading}
-                          title="Manage vehicle compatibility"
-                        >
-                          <span className="action-icon">🏍️</span>
-                          Compatibility
-                        </button>
-
-                        {/* DEACTIVATE / RESTORE */}
-
-                        {isActive ? (
-                          <button
-                            type="button"
-                            className="action-button deactivate-button"
-                            onClick={() =>
-                              handleDeactivate(
-                                product
-                              )
-                            }
-                            disabled={loading}
-                            title="Deactivate product"
-                          >
-                            <span className="action-icon">
-                              ⏸
-                            </span>
-
-                            Deactivate
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="action-button restore-button"
-                            onClick={() =>
-                              handleRestore(
-                                product
-                              )
-                            }
-                            disabled={loading}
-                            title="Restore product"
-                          >
-                            <span className="action-icon">
-                              ↻
-                            </span>
-
-                            Restore
-                          </button>
-                        )}
+                        {/* Activate/deactivate actions are managed in Inventory. */}
 
                       </div>
 

@@ -63,6 +63,13 @@ export default function AdminUsers() {
     }
   };
 
+  const permanentlyDeleteUser = async (user) => {
+    if (Number(user.is_active) === 1) { setError("Deactivate this user before permanently deleting the account."); return; }
+    if (!window.confirm(`Permanently delete user "${user.full_name}" (@${user.username})? This cannot be undone.`)) return;
+    try { setError(""); await api.delete(`/api/users/admin/users/${user.user_id}/permanent`); await loadUsers(); }
+    catch (err) { setError(err.response?.data?.error || "Could not permanently delete user."); }
+  };
+
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter((user) => {
@@ -141,7 +148,7 @@ export default function AdminUsers() {
                 <div className="user-main"><strong>{user.full_name}</strong><span>@{user.username}</span><small>{user.email}</small></div>
                 <div className="user-meta"><span className={`role-chip ${String(user.role || "").toLowerCase()}`}><i className="bi bi-person-badge" /> {user.role}</span><span className="store-chip"><i className="bi bi-shop" /> {user.store_name || "No Store"}</span></div>
                 <div className="user-status"><span className={`status-chip ${Number(user.is_active) === 1 ? "active" : "inactive"}`}><i className="bi bi-circle-fill" /> {Number(user.is_active) === 1 ? "Active" : "Inactive"}</span></div>
-                <div className="user-action">{user.role !== "ADMIN" && <button className={Number(user.is_active) === 1 ? "deactivate" : "activate"} onClick={() => toggleUserStatus(user)}><i className={`bi ${Number(user.is_active) === 1 ? "bi-person-dash" : "bi-person-check"}`} /> {Number(user.is_active) === 1 ? "Deactivate" : "Activate"}</button>}</div>
+                <div className="user-action">{user.role !== "ADMIN" && <><button className={Number(user.is_active) === 1 ? "deactivate" : "activate"} onClick={() => toggleUserStatus(user)}><i className={`bi ${Number(user.is_active) === 1 ? "bi-person-dash" : "bi-person-check"}`} /> {Number(user.is_active) === 1 ? "Deactivate" : "Activate"}</button>{Number(user.is_active) !== 1 && <button className="deactivate" onClick={() => permanentlyDeleteUser(user)}><i className="bi bi-trash3" /> Permanently Delete</button>}</>}</div>
               </div>
             ))}
           </div>

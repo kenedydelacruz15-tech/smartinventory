@@ -61,6 +61,13 @@ export default function Categories() {
     }
   };
 
+  const permanentlyDeleteCategory = async (category) => {
+    if (Number(category.is_active) === 1) { setError("Deactivate the category before permanently deleting it."); return; }
+    if (!window.confirm(`Permanently delete category "${category.category_name}"? This cannot be undone. Categories with products cannot be deleted.`)) return;
+    try { setError(""); setSuccess(""); await api.delete(`/api/categories/${category.category_id}/permanent`); setSuccess("Category permanently deleted."); await loadCategories(); }
+    catch (err) { setError(err.response?.data?.message || err.response?.data?.error || "Could not permanently delete category."); }
+  };
+
   const activeCount = items.filter((x) => Number(x.is_active) === 1).length;
   const inactiveCount = items.filter((x) => Number(x.is_active) === 0).length;
 
@@ -109,7 +116,7 @@ export default function Categories() {
                   <td>#{category.category_id}</td><td><strong><i className="bi bi-folder2-open" /> {category.category_name}</strong></td><td>{category.description || "—"}</td>
                   <td><span className={`status-badge ${category.is_active ? "active" : "inactive"}`}><i className={`bi ${category.is_active ? "bi-check-circle" : "bi-dash-circle"}`} /> {category.is_active ? "Active" : "Inactive"}</span></td>
                   <td><div className="action-buttons">
-                    {category.is_active ? <><button className="action-button edit-button" onClick={() => editCategory(category)} title="Edit"><i className="bi bi-pencil" /> Edit</button><button className="action-button deactivate-button" onClick={() => changeStatus(category, "deactivate")} title="Deactivate"><i className="bi bi-slash-circle" /> Deactivate</button></> : <button className="action-button restore-button" onClick={() => changeStatus(category, "restore")}><i className="bi bi-arrow-counterclockwise" /> Restore</button>}
+                    {category.is_active ? <><button className="action-button edit-button" onClick={() => editCategory(category)} title="Edit"><i className="bi bi-pencil" /> Edit</button><button className="action-button deactivate-button" onClick={() => changeStatus(category, "deactivate")} title="Deactivate"><i className="bi bi-slash-circle" /> Deactivate</button></> : <><button className="action-button restore-button" onClick={() => changeStatus(category, "restore")}><i className="bi bi-arrow-counterclockwise" /> Restore</button><button className="action-button deactivate-button" onClick={() => permanentlyDeleteCategory(category)}><i className="bi bi-trash3" /> Permanently Delete</button></>}
                   </div></td>
                 </tr>
               ))}

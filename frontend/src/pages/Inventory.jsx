@@ -43,6 +43,7 @@ function ProductThumbnail({ item }) {
       ) : (
         <i className="bi bi-image" aria-label="No product image" style={{ fontSize: 22, color: "var(--muted, #94a3b8)" }} />
       )}
+
     </div>
   );
 }
@@ -53,6 +54,7 @@ export default function Inventory() {
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   // Search
   const [search, setSearch] = useState("");
@@ -68,15 +70,25 @@ export default function Inventory() {
   const [editItem, setEditItem] = useState(null);
   const [editQuantity, setEditQuantity] = useState("");
 
+  // Vehicle compatibility is managed from Inventory.
+  const [compatibilityItem, setCompatibilityItem] = useState(null);
+  const [compatibilityList, setCompatibilityList] = useState([]);
+  const [compatibilityBrands, setCompatibilityBrands] = useState([]);
+  const [compatibilityModels, setCompatibilityModels] = useState([]);
+  const [compatibilityBrand, setCompatibilityBrand] = useState("");
+  const [compatibilityModel, setCompatibilityModel] = useState("");
+  const [compatibilityError, setCompatibilityError] = useState("");
+  const [compatibilityLoading, setCompatibilityLoading] = useState(false);
+
   // Load inventory
   const loadInventory = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const res = await api.get("/api/inventory/", {
-        params: search ? { search } : {},
-      });
+      const params = { status: "all" };
+      if (search.trim()) params.search = search.trim();
+      const res = await api.get("/api/inventory/", { params });
 
       setItems(res.data || []);
     } catch (err) {
@@ -120,17 +132,27 @@ export default function Inventory() {
       .map((item) => item.category_name)
       .filter(Boolean);
 
-    return [...new Set(activeCategories.length ? activeCategories : inventoryCategories)]
+    return [...new Set([...activeCategories, ...inventoryCategories])]
       .sort((a, b) => a.localeCompare(b));
   })();
 
-  const visibleItems = selectedCategory === "ALL"
-    ? items
-    : items.filter(
-        (item) =>
-          (item.category_name || "Uncategorized").toLowerCase() ===
-          selectedCategory.toLowerCase()
-      );
+  const isActiveItem = (item) =>
+    (item.is_active === true || Number(item.is_active) === 1) &&
+    (item.product_is_active === undefined || Number(item.product_is_active) === 1);
+
+  const statusItems = items.filter((item) => {
+    if (statusFilter === "active") return isActiveItem(item);
+    if (statusFilter === "inactive") return !isActiveItem(item);
+    return true;
+  });
+
+  const visibleItems = statusItems.filter((item) =>
+    selectedCategory === "ALL" ||
+    (item.category_name || "Uncategorized").toLowerCase() === selectedCategory.toLowerCase()
+  );
+
+  const activeCount = items.filter(isActiveItem).length;
+  const inactiveCount = items.length - activeCount;
 
   // Search when user presses Enter
   const handleSearch = (e) => {
@@ -299,6 +321,14 @@ export default function Inventory() {
     }
   };
 
+  const permanentlyDeleteItem = async (item) => {
+    if (isActiveItem(item)) { alert("Deactivate this inventory item before permanently deleting it."); return; }
+    if (Number(item.stock_quantity || 0) > 0) { alert("Stock must be zero before permanently deleting an inventory record."); return; }
+    if (!window.confirm(`Permanently delete the inventory record for "${item.product_name}"? The product will move to Products Trash and disappear from the active Products list. This cannot be undone.`)) return;
+    try { await api.delete(`/api/inventory/${item.inventory_id}/permanent`); alert("Inventory record deleted. Product moved to Products Trash."); await loadInventory(); }
+    catch (err) { alert(err.response?.data?.error || "Could not permanently delete inventory record."); }
+  };
+
   // Restore inventory
   const restoreItem = async (item) => {
     const confirmed = window.confirm(
@@ -330,6 +360,72 @@ export default function Inventory() {
     }
   };
 
+  const openCompatibility = async (item) => {
+    setCompatibilityItem(item);
+    setCompatibilityList([]);
+    setCompatibilityBrand("");
+    setCompatibilityModel("");
+    setCompatibilityModels([]);
+    setCompatibilityError("");
+    setCompatibilityLoading(true);
+    try {
+      const [brandsRes, listRes] = await Promise.all([
+        api.get("/api/products/compatibility/brands"),
+        api.get(`/api/products/${item.product_id}/compatibility`),
+      ]);
+      setCompatibilityBrands(Array.isArray(brandsRes.data) ? brandsRes.data : []);
+      setCompatibilityList(Array.isArray(listRes.data) ? listRes.data : []);
+    } catch (err) {
+      setCompatibilityError(err.response?.data?.error || "Could not load vehicle compatibility.");
+    } finally {
+      setCompatibilityLoading(false);
+    }
+  };
+
+  const loadCompatibilityModels = async (brandId) => {
+    setCompatibilityBrand(brandId);
+    setCompatibilityModel("");
+    if (!brandId) { setCompatibilityModels([]); return; }
+    try {
+      const res = await api.get("/api/products/compatibility/models", { params: { brand_id: brandId } });
+      setCompatibilityModels(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      setCompatibilityError(err.response?.data?.error || "Could not load vehicle models.");
+    }
+  };
+
+  const addCompatibility = async () => {
+    if (!compatibilityItem || !compatibilityModel) {
+      setCompatibilityError("Select a vehicle model first.");
+      return;
+    }
+    try {
+      setCompatibilityLoading(true);
+      setCompatibilityError("");
+      await api.post(`/api/products/${compatibilityItem.product_id}/compatibility`, { model_id: Number(compatibilityModel) });
+      const res = await api.get(`/api/products/${compatibilityItem.product_id}/compatibility`);
+      setCompatibilityList(Array.isArray(res.data) ? res.data : []);
+      setCompatibilityModel("");
+    } catch (err) {
+      setCompatibilityError(err.response?.data?.error || "Could not add compatibility.");
+    } finally {
+      setCompatibilityLoading(false);
+    }
+  };
+
+  const removeCompatibility = async (entry) => {
+    if (!compatibilityItem || !window.confirm(`Remove ${entry.brand_name} ${entry.model_name} from this product?`)) return;
+    try {
+      setCompatibilityLoading(true);
+      await api.delete(`/api/products/${compatibilityItem.product_id}/compatibility/${entry.compatibility_id}`);
+      setCompatibilityList((current) => current.filter((row) => row.compatibility_id !== entry.compatibility_id));
+    } catch (err) {
+      setCompatibilityError(err.response?.data?.error || "Could not remove compatibility.");
+    } finally {
+      setCompatibilityLoading(false);
+    }
+  };
+
   return (
     <div className="page-container inventory-page">
       <div className="page-header">
@@ -357,6 +453,22 @@ export default function Inventory() {
           <div className="inventory-summary-icon"><i className="bi bi-x-circle" /></div>
           <div><span>Out of Stock</span><strong>{items.filter((x) => Number(x.stock_quantity) === 0).length}</strong><small>Requires replenishment</small></div>
         </div>
+      </div>
+
+      {/* Active / inactive inventory filters */}
+      <div className="inventory-status-filters" role="group" aria-label="Filter inventory by status" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "0 0 16px" }}>
+        {[{ value: "all", label: "All Items", count: items.length }, { value: "active", label: "Active", count: activeCount }, { value: "inactive", label: "Inactive", count: inactiveCount }].map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={statusFilter === option.value ? "btn-primary" : "btn-secondary"}
+            aria-pressed={statusFilter === option.value}
+            onClick={() => setStatusFilter(option.value)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, borderRadius: 9, padding: "9px 13px", fontWeight: statusFilter === option.value ? 600 : 500 }}
+          >
+            {option.label}<span className="inventory-filter-count" style={{ opacity: 0.8 }}>{option.count}</span>
+          </button>
+        ))}
       </div>
 
       {/* Search */}
@@ -434,11 +546,11 @@ export default function Inventory() {
             }}
           >
             <span><i className="bi bi-grid" /> All Items</span>
-            <span>{items.length}</span>
+            <span>{statusItems.length}</span>
           </button>
 
           {categoryOptions.map((categoryName) => {
-            const count = items.filter(
+            const count = statusItems.filter(
               (item) => (item.category_name || "Uncategorized").toLowerCase() === categoryName.toLowerCase()
             ).length;
             const active = selectedCategory.toLowerCase() === categoryName.toLowerCase();
@@ -483,7 +595,7 @@ export default function Inventory() {
               }}
             >
               <span><i className="bi bi-folder" /> Uncategorized</span>
-              <span>{items.filter((item) => !item.category_name).length}</span>
+              <span>{statusItems.filter((item) => !item.category_name).length}</span>
             </button>
           )}
         </aside>
@@ -492,10 +604,10 @@ export default function Inventory() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", margin: "0 0 12px", flexWrap: "wrap" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "20px" }}>
-                {selectedCategory === "ALL" ? "All Inventory Items" : selectedCategory}
+                {selectedCategory === "ALL" ? (statusFilter === "all" ? "All Inventory Items" : `${statusFilter === "active" ? "Active" : "Inactive"} Inventory Items`) : selectedCategory}
               </h2>
               <p style={{ margin: "4px 0 0", color: "var(--muted, #64748b)", fontSize: "13px" }}>
-                Showing {visibleItems.length} {visibleItems.length === 1 ? "item" : "items"}
+                Showing {visibleItems.length} {visibleItems.length === 1 ? "item" : "items"} · {statusFilter === "all" ? "all statuses" : `${statusFilter} only`}
               </p>
             </div>
             {selectedCategory !== "ALL" && (
@@ -569,10 +681,15 @@ export default function Inventory() {
                               <button type="button" className="btn-success" onClick={() => openMovement(item, "STOCK_IN")}>Stock In</button>
                               <button type="button" className="btn-warning" onClick={() => openMovement(item, "STOCK_OUT")}>Stock Out</button>
                               <button type="button" className="btn-primary" onClick={() => openEdit(item)}>Adjust</button>
+                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Compatibility</button>
                               <button type="button" className="btn-danger" onClick={() => deactivateItem(item)}>Deactivate</button>
                             </>
                           ) : (
-                            <button type="button" className="btn-primary" onClick={() => restoreItem(item)}>Restore</button>
+                            <>
+                              <button type="button" className="btn-primary" onClick={() => restoreItem(item)}>Restore</button>
+                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Compatibility</button>
+                              <button type="button" className="btn-danger" onClick={() => permanentlyDeleteItem(item)}>Permanently Delete</button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -770,6 +887,45 @@ export default function Inventory() {
                   : "Save Adjustment"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {compatibilityItem && (
+        <div className="inventory-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCompatibilityItem(null); }}>
+          <div className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-compatibility-title">
+            <div className="modal-header">
+              <div>
+                <h2 id="inventory-compatibility-title">Vehicle Compatibility</h2>
+                <p className="modal-help">{compatibilityItem.product_name}</p>
+              </div>
+              <button type="button" aria-label="Close compatibility" onClick={() => setCompatibilityItem(null)}>×</button>
+            </div>
+            {compatibilityError && <div className="error-message">{compatibilityError}</div>}
+            <div className="form-grid">
+              <label>Vehicle brand
+                <select value={compatibilityBrand} onChange={(e) => loadCompatibilityModels(e.target.value)}>
+                  <option value="">Select brand</option>
+                  {compatibilityBrands.map((brand) => <option key={brand.brand_id} value={brand.brand_id}>{brand.brand_name}</option>)}
+                </select>
+              </label>
+              <label>Vehicle model
+                <select value={compatibilityModel} onChange={(e) => setCompatibilityModel(e.target.value)} disabled={!compatibilityBrand}>
+                  <option value="">Select model</option>
+                  {compatibilityModels.map((model) => <option key={model.model_id} value={model.model_id}>{model.model_name}{model.model_year ? ` (${model.model_year})` : ""}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => setCompatibilityItem(null)}>Close</button>
+              <button type="button" className="btn-primary" onClick={addCompatibility} disabled={compatibilityLoading || !compatibilityModel}>{compatibilityLoading ? "Saving..." : "Add Compatibility"}</button>
+            </div>
+            <h3>Compatible vehicles</h3>
+            {compatibilityLoading && compatibilityList.length === 0 ? <p className="muted">Loading compatibility...</p> : compatibilityList.length === 0 ? <p className="muted">No compatible vehicles added yet.</p> : (
+              <div className="table-container"><table className="data-table"><thead><tr><th>Brand</th><th>Model</th><th>Year</th><th>Action</th></tr></thead><tbody>
+                {compatibilityList.map((entry) => <tr key={entry.compatibility_id}><td>{entry.brand_name}</td><td>{entry.model_name}</td><td>{entry.model_year || "—"}</td><td><button type="button" className="btn-danger" onClick={() => removeCompatibility(entry)} disabled={compatibilityLoading}>Remove</button></td></tr>)}
+              </tbody></table></div>
+            )}
           </div>
         </div>
       )}

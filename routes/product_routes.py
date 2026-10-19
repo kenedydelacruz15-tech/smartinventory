@@ -3,10 +3,11 @@ import requests
 from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from routes.user_routes import role_required
 from database import get_db_connection
+from audit_logger import create_audit_log
 
 
 product_bp = Blueprint(
@@ -1529,6 +1530,9 @@ def create_product():
             store_id
         ))
 
+        create_audit_log(store_id, "PRODUCT_ADDED", "PRODUCT", product_id,
+                         f"Added product: {product_name}", get_jwt_identity() or None,
+                         new_data={"product_name": product_name, "sku": sku, "category_id": category_id, "selling_price": selling_price, "reorder_level": reorder_level})
         connection.commit()
 
         return jsonify({
@@ -1804,6 +1808,9 @@ def update_product(product_id):
             store_id
         ))
 
+        create_audit_log(store_id, "PRODUCT_EDITED", "PRODUCT", product_id,
+                         f"Edited product: {product_name}", get_jwt_identity() or None,
+                         new_data={"product_name": product_name, "sku": sku, "category_id": category_id, "selling_price": selling_price, "reorder_level": reorder_level})
         connection.commit()
 
         return jsonify({
@@ -1900,6 +1907,9 @@ def deactivate_product(product_id):
             store_id
         ))
 
+        create_audit_log(store_id, "PRODUCT_DEACTIVATED", "PRODUCT", product_id,
+                         f"Deactivated product: {product.get('product_name')}", get_jwt_identity() or None,
+                         old_data=product, new_data={"is_active": 0})
         connection.commit()
 
         return jsonify({
@@ -2009,6 +2019,9 @@ def restore_product(product_id):
             store_id
         ))
 
+        create_audit_log(store_id, "PRODUCT_RESTORED", "PRODUCT", product_id,
+                         f"Restored product: {product.get('product_name')}", get_jwt_identity() or None,
+                         new_data={"is_active": 1})
         connection.commit()
 
         return jsonify({

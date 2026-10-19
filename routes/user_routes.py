@@ -10,6 +10,7 @@ from flask_jwt_extended import (
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from database import get_db_connection
+from audit_logger import create_audit_log
 
 
 # Creates the Blueprint for authentication and user management.
@@ -384,6 +385,11 @@ def create_staff():
             store_id
         ))
 
+        # Record staff creation with username as the actor label on future events.
+        new_user_id = cursor.lastrowid
+        create_audit_log(store_id, "USER_ADDED", "USER", new_user_id,
+                         f"Added staff user: {username}", get_jwt_identity(),
+                         new_data={"username": username, "full_name": full_name, "email": email, "role": "STAFF"})
         # Saves the new staff account.
         connection.commit()
 
@@ -575,7 +581,7 @@ def update_staff(user_id):
 
         # Checks whether the staff belongs to the owner's store.
         cursor.execute("""
-            SELECT user_id, role
+            SELECT user_id, username, full_name, role
             FROM users
             WHERE user_id = %s
             AND store_id = %s
@@ -619,6 +625,9 @@ def update_staff(user_id):
             store_id
         ))
 
+        create_audit_log(store_id, "USER_EDITED", "USER", user_id,
+                         f"Edited staff user: {user.get('username')}", get_jwt_identity(),
+                         new_data={"full_name": full_name, "email": email})
         # Saves the changes.
         connection.commit()
 
@@ -673,7 +682,7 @@ def deactivate_staff(user_id):
 
         # Checks whether the staff belongs to the owner's store.
         cursor.execute("""
-            SELECT user_id, role
+            SELECT user_id, username, full_name, role
             FROM users
             WHERE user_id = %s
             AND store_id = %s
@@ -713,6 +722,9 @@ def deactivate_staff(user_id):
             store_id
         ))
 
+        create_audit_log(store_id, "USER_DEACTIVATED", "USER", user_id,
+                         f"Deactivated staff user: {user.get('username')}", get_jwt_identity(),
+                         new_data={"is_active": 0})
         # Saves the changes.
         connection.commit()
 

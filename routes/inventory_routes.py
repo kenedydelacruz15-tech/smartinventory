@@ -1,8 +1,9 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from routes.user_routes import role_required
 from database import get_db_connection
+from audit_logger import create_audit_log
 
 
 inventory_bp = Blueprint(
@@ -315,14 +316,10 @@ def update_inventory(inventory_id):
 
         # Gets current inventory.
         cursor.execute("""
-            SELECT
-                inventory_id,
-                product_id,
-                stock_quantity,
-                is_active
-            FROM inventory
-            WHERE inventory_id = %s
-            AND store_id = %s
+            SELECT i.inventory_id, i.product_id, p.product_name, i.stock_quantity, i.is_active
+            FROM inventory i
+            INNER JOIN products p ON p.product_id = i.product_id AND p.store_id = i.store_id
+            WHERE i.inventory_id = %s AND i.store_id = %s
         """, (
             inventory_id,
             store_id
@@ -415,6 +412,11 @@ def update_inventory(inventory_id):
             store_id
         ))
 
+        create_audit_log(store_id, "INVENTORY_ADJUSTED", "INVENTORY", inventory_id,
+                         f"Adjusted stock for {item.get('product_name') or ('Product #' + str(item['product_id']))}: {previous_quantity} → {stock_quantity} units",
+                         get_jwt_identity() or None,
+                         old_data={"stock_quantity": previous_quantity},
+                         new_data={"stock_quantity": stock_quantity, "adjustment": movement_quantity, "movement_type": movement_type, "remarks": remarks})
         connection.commit()
 
         return jsonify({
@@ -512,14 +514,10 @@ def stock_in(inventory_id):
 
         # Gets current stock.
         cursor.execute("""
-            SELECT
-                inventory_id,
-                product_id,
-                stock_quantity,
-                is_active
-            FROM inventory
-            WHERE inventory_id = %s
-            AND store_id = %s
+            SELECT i.inventory_id, i.product_id, p.product_name, i.stock_quantity, i.is_active
+            FROM inventory i
+            INNER JOIN products p ON p.product_id = i.product_id AND p.store_id = i.store_id
+            WHERE i.inventory_id = %s AND i.store_id = %s
         """, (
             inventory_id,
             store_id
@@ -594,6 +592,11 @@ def stock_in(inventory_id):
             store_id
         ))
 
+        create_audit_log(store_id, "STOCK_IN", "INVENTORY", inventory_id,
+                         f"Stock in: {item.get('product_name') or ('Product #' + str(item['product_id']))} — +{quantity} units ({previous_quantity} → {new_quantity})",
+                         get_jwt_identity() or None,
+                         old_data={"stock_quantity": previous_quantity},
+                         new_data={"stock_quantity": new_quantity, "quantity": quantity, "reason": reference_type, "remarks": remarks})
         connection.commit()
 
         return jsonify({
@@ -707,14 +710,10 @@ def stock_out(inventory_id):
 
         # Gets current stock.
         cursor.execute("""
-            SELECT
-                inventory_id,
-                product_id,
-                stock_quantity,
-                is_active
-            FROM inventory
-            WHERE inventory_id = %s
-            AND store_id = %s
+            SELECT i.inventory_id, i.product_id, p.product_name, i.stock_quantity, i.is_active
+            FROM inventory i
+            INNER JOIN products p ON p.product_id = i.product_id AND p.store_id = i.store_id
+            WHERE i.inventory_id = %s AND i.store_id = %s
         """, (
             inventory_id,
             store_id
@@ -799,6 +798,11 @@ def stock_out(inventory_id):
             store_id
         ))
 
+        create_audit_log(store_id, "STOCK_OUT", "INVENTORY", inventory_id,
+                         f"Stock out: {item.get('product_name') or ('Product #' + str(item['product_id']))} — -{quantity} units ({previous_quantity} → {new_quantity})",
+                         get_jwt_identity() or None,
+                         old_data={"stock_quantity": previous_quantity},
+                         new_data={"stock_quantity": new_quantity, "quantity": quantity, "reason": reference_type, "remarks": remarks})
         connection.commit()
 
         return jsonify({
@@ -859,14 +863,10 @@ def deactivate_inventory(inventory_id):
         )
 
         cursor.execute("""
-            SELECT
-                inventory_id,
-                product_id,
-                stock_quantity,
-                is_active
-            FROM inventory
-            WHERE inventory_id = %s
-            AND store_id = %s
+            SELECT i.inventory_id, i.product_id, p.product_name, i.stock_quantity, i.is_active
+            FROM inventory i
+            INNER JOIN products p ON p.product_id = i.product_id AND p.store_id = i.store_id
+            WHERE i.inventory_id = %s AND i.store_id = %s
         """, (
             inventory_id,
             store_id
@@ -906,6 +906,17 @@ def deactivate_inventory(inventory_id):
             store_id
         ))
 
+        # Keep the Products page in sync with Inventory.
+        cursor.execute("""
+            UPDATE products
+            SET is_active = 0
+            WHERE product_id = %s
+              AND store_id = %s
+        """, (item["product_id"], store_id))
+
+        create_audit_log(store_id, "INVENTORY_DEACTIVATED", "INVENTORY", inventory_id,
+                         f"Deactivated inventory item: {item.get('product_name') or ('Product #' + str(item['product_id']))}",
+                         get_jwt_identity() or None, old_data=item, new_data={"is_active": 0})
         connection.commit()
 
         return jsonify({
@@ -952,8 +963,9 @@ def restore_inventory(inventory_id):
 
         connection = get_db_connection()
 
-        cursor = connection.cursor()
-
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT i.inventory_id, i.product_id, p.product_name FROM inventory i JOIN products p ON p.product_id=i.product_id AND p.store_id=i.store_id WHERE i.inventory_id=%s AND i.store_id=%s AND i.is_active=0", (inventory_id, store_id))
+        restore_item = cursor.fetchone()
         cursor.execute("""
             UPDATE inventory
             SET is_active = 1
@@ -974,6 +986,17 @@ def restore_inventory(inventory_id):
                 )
             }), 404
 
+        # Restore the matching product so it appears on the Products page again.
+        cursor.execute("""
+            UPDATE products
+            SET is_active = 1
+            WHERE product_id = %s
+              AND store_id = %s
+        """, (restore_item["product_id"], store_id))
+
+        create_audit_log(store_id, "INVENTORY_RESTORED", "INVENTORY", inventory_id,
+                         f"Restored inventory item: {(restore_item or {}).get('product_name') or ('Product #' + str((restore_item or {}).get('product_id', 'unknown')))}",
+                         get_jwt_identity() or None, new_data={"is_active": 1})
         connection.commit()
 
         return jsonify({
@@ -994,5 +1017,81 @@ def restore_inventory(inventory_id):
         if cursor:
             cursor.close()
 
+        if connection:
+            connection.close()
+
+# =========================================================
+# PERMANENTLY DELETE INVENTORY RECORD
+# Remove the inventory row but retain product/history data.
+# The product is moved to Products Trash so it disappears
+# from the active Products list without breaking references.
+# OWNER ONLY
+# =========================================================
+@inventory_bp.route("/<int:inventory_id>/permanent", methods=["DELETE"])
+@role_required("OWNER")
+def permanently_delete_inventory(inventory_id):
+    store_id = get_jwt().get("store_id")
+    if not store_id:
+        return jsonify({"error": "Your account is not assigned to a store."}), 400
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT i.inventory_id, i.product_id, i.stock_quantity,
+                   i.is_active, p.product_name
+            FROM inventory i
+            INNER JOIN products p
+              ON p.product_id = i.product_id
+             AND p.store_id = i.store_id
+            WHERE i.inventory_id = %s AND i.store_id = %s
+            LIMIT 1
+        """, (inventory_id, store_id))
+        item = cursor.fetchone()
+
+        if not item:
+            return jsonify({"error": "Inventory record not found."}), 404
+        if int(item["is_active"]) == 1:
+            return jsonify({"error": "Deactivate this inventory item before permanently deleting its inventory record."}), 400
+        if int(item["stock_quantity"] or 0) > 0:
+            return jsonify({"error": "Stock must be zero before permanently deleting an inventory record."}), 400
+
+        # Soft-delete the product instead of physically deleting it;
+        # this preserves stock movements and other related history.
+        cursor.execute("""
+            UPDATE products
+            SET is_active = 0
+            WHERE product_id = %s AND store_id = %s
+        """, (item["product_id"], store_id))
+
+        cursor.execute("""
+            DELETE FROM inventory
+            WHERE inventory_id = %s AND store_id = %s
+        """, (inventory_id, store_id))
+
+        create_audit_log(
+            store_id,
+            "INVENTORY_PERMANENTLY_DELETED",
+            "INVENTORY",
+            inventory_id,
+            f"Permanently deleted inventory record for product: {item['product_name']}",
+            get_jwt_identity() or None,
+            old_data=item,
+            new_data={"inventory_record_deleted": True, "product_moved_to_trash": True}
+        )
+        connection.commit()
+        return jsonify({
+            "message": "Inventory record deleted. The product was moved to Products Trash."
+        }), 200
+    except Exception as e:
+        if connection:
+            connection.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
         if connection:
             connection.close()
