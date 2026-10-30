@@ -1,0 +1,10 @@
+.login-back-link{width:fit-content;display:flex;align-items:center;gap:8px;margin:0 0 24px;padding:9px 11px;border:1px solid #e4e9ef;border-radius:7px;background:#f8fafc;color:#475467;text-decoration:none;font-size:12px;font-weight:750;line-height:1;transition:background .15s,border-color .15s,color .15s}.login-back-link:hover{border-color:#bfd5f5;background:#f1f6fd;color:#2563eb}.login-back-link i{font-size:13px}
+.login-page .login-visual{background:linear-gradient(145deg,#080a0f 0%,#12151c 64%,#321015 145%)}
+.login-page .login-brand-mark,.login-page .mobile-login-logo{background:#e21f2f;box-shadow:0 6px 18px #e21f2f45}
+.login-page .login-visual .eyebrow,.login-page .login-card>.eyebrow{color:#ed303d}
+.login-page .login-feature-row i{color:#ed303d}
+.login-page .login-submit{background:#e21f2f;color:#fff}
+.login-page .login-submit:hover:not(:disabled){background:#bd1724}
+.login-page .form-field input:focus,.login-page .form-field select:focus,.login-page .form-field textarea:focus{border-color:#e21f2f;box-shadow:0 0 0 3px #e21f2f1a}
+.login-page .login-back-link{border-color:#f0d8da;background:#fff8f8;color:#9f2630}
+.login-page .login-back-link:hover{border-color:#e7a8ad;background:#fff1f2;color:#bd1724}
