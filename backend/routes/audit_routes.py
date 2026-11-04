@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from backend.database import get_db_connection
+from backend.audit_logger import ensure_audit_logs_table
 
 audit_bp = Blueprint("audit_bp", __name__)
 
@@ -23,6 +24,7 @@ def _fetch_logs(where_sql="", params=None, limit=250):
     cursor = None
     try:
         connection = get_db_connection()
+        ensure_audit_logs_table(connection)
         cursor = connection.cursor(dictionary=True)
         sql = """
             SELECT log_id, actor_user_id, actor_name, actor_role, store_id,

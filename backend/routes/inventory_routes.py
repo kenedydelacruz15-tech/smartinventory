@@ -1,9 +1,15 @@
+import logging
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from backend.routes.user_routes import role_required
 from backend.database import get_db_connection
 from backend.audit_logger import create_audit_log
+from backend.services.stock_out_schema import (
+    ensure_stock_out_store_foreign_key,
+    stock_out_error_message,
+)
 
 
 inventory_bp = Blueprint(
@@ -484,12 +490,45 @@ def stock_in(inventory_id):
         )
     ).strip().upper()
 
+    allowed_references = [
+        "SUPPLIER",
+        "CUSTOMER_RETURN",
+        "TRANSFER",
+        "ADJUSTMENT",
+        "OTHER"
+    ]
+
+    if reference_type not in allowed_references:
+        return jsonify({
+            "error": "Invalid stock-in reason.",
+            "allowed_reasons": allowed_references
+        }), 400
+
+    supplier_id = data.get("supplier_id")
+    if supplier_id in ("", None):
+        supplier_id = None
+    else:
+        try:
+            supplier_id = int(supplier_id)
+            if supplier_id <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({
+                "error": "Supplier ID must be a valid number."
+            }), 400
+
+    reference_number = str(data.get("reference_number", "")).strip()
     remarks = str(
         data.get(
             "remarks",
             ""
         )
     ).strip()
+    movement_remarks = remarks
+    if reference_number:
+        movement_remarks = f"Reference: {reference_number}"
+        if remarks:
+            movement_remarks = f"{movement_remarks} | {remarks}"
 
     store_id = get_jwt().get(
         "store_id"
@@ -507,6 +546,7 @@ def stock_in(inventory_id):
     try:
 
         connection = get_db_connection()
+        connection.start_transaction()
 
         cursor = connection.cursor(
             dictionary=True
@@ -518,6 +558,7 @@ def stock_in(inventory_id):
             FROM inventory i
             INNER JOIN products p ON p.product_id = i.product_id AND p.store_id = i.store_id
             WHERE i.inventory_id = %s AND i.store_id = %s
+            FOR UPDATE
         """, (
             inventory_id,
             store_id
@@ -530,6 +571,22 @@ def stock_in(inventory_id):
             return jsonify({
                 "error": "Inventory record not found."
             }), 404
+
+        if supplier_id is not None:
+            cursor.execute("""
+                SELECT supplier_id
+                FROM suppliers
+                WHERE supplier_id = %s
+                AND store_id = %s
+                AND deleted_at IS NULL
+            """, (
+                supplier_id,
+                store_id
+            ))
+            if not cursor.fetchone():
+                return jsonify({
+                    "error": "Supplier not found or does not belong to your store."
+                }), 404
 
         if item["is_active"] == 0:
 
@@ -544,6 +601,22 @@ def stock_in(inventory_id):
         new_quantity = (
             previous_quantity + quantity
         )
+
+        cursor.execute("""
+            INSERT INTO stock_in (
+                product_id,
+                quantity,
+                supplier_id,
+                store_id
+            )
+            VALUES (%s, %s, %s, %s)
+        """, (
+            item["product_id"],
+            quantity,
+            supplier_id,
+            store_id
+        ))
+        stock_in_id = cursor.lastrowid
 
         # Adds stock.
         cursor.execute("""
@@ -587,8 +660,8 @@ def stock_in(inventory_id):
             previous_quantity,
             new_quantity,
             reference_type,
-            inventory_id,
-            remarks,
+            stock_in_id,
+            movement_remarks or None,
             store_id
         ))
 
@@ -596,14 +669,17 @@ def stock_in(inventory_id):
                          f"Stock in: {item.get('product_name') or ('Product #' + str(item['product_id']))} — +{quantity} units ({previous_quantity} → {new_quantity})",
                          get_jwt_identity() or None,
                          old_data={"stock_quantity": previous_quantity},
-                         new_data={"stock_quantity": new_quantity, "quantity": quantity, "reason": reference_type, "remarks": remarks})
+                         new_data={"stock_quantity": new_quantity, "quantity": quantity, "reason": reference_type, "reference_number": reference_number, "remarks": remarks})
         connection.commit()
 
         return jsonify({
             "message": "Stock added successfully.",
+            "stock_in_id": stock_in_id,
+            "supplier_id": supplier_id,
             "previous_quantity": previous_quantity,
             "new_quantity": new_quantity,
-            "quantity_added": quantity
+            "quantity_added": quantity,
+            "reason": reference_type
         }), 200
 
     except Exception as e:
@@ -665,7 +741,10 @@ def stock_out(inventory_id):
     ).strip().upper()
 
     allowed_references = [
+        "SALE",
         "DAMAGED",
+        "RETURN_TO_SUPPLIER",
+        "TRANSFER",
         "LOST",
         "ADJUSTMENT",
         "OTHER"
@@ -674,18 +753,22 @@ def stock_out(inventory_id):
     if reference_type not in allowed_references:
 
         return jsonify({
-            "error": (
-                "Stock-out reason must be "
-                "DAMAGED, LOST, ADJUSTMENT, or OTHER."
-            )
+            "error": "Invalid stock-out reason.",
+            "allowed_reasons": allowed_references
         }), 400
 
+    reference_number = str(data.get("reference_number", "")).strip()
     remarks = str(
         data.get(
             "remarks",
             ""
         )
     ).strip()
+    movement_remarks = remarks
+    if reference_number:
+        movement_remarks = f"Reference: {reference_number}"
+        if remarks:
+            movement_remarks = f"{movement_remarks} | {remarks}"
 
     store_id = get_jwt().get(
         "store_id"
@@ -703,6 +786,8 @@ def stock_out(inventory_id):
     try:
 
         connection = get_db_connection()
+        ensure_stock_out_store_foreign_key(connection)
+        connection.start_transaction()
 
         cursor = connection.cursor(
             dictionary=True
@@ -714,6 +799,7 @@ def stock_out(inventory_id):
             FROM inventory i
             INNER JOIN products p ON p.product_id = i.product_id AND p.store_id = i.store_id
             WHERE i.inventory_id = %s AND i.store_id = %s
+            FOR UPDATE
         """, (
             inventory_id,
             store_id
@@ -750,6 +836,51 @@ def stock_out(inventory_id):
         new_quantity = (
             previous_quantity - quantity
         )
+
+        legacy_reason = {
+            "SALE": "SOLD",
+            "DAMAGED": "DAMAGED",
+            "RETURN_TO_SUPPLIER": "RETURNED_TO_SUPPLIER",
+            "TRANSFER": "OTHER",
+            "LOST": "LOST",
+            "ADJUSTMENT": "OTHER",
+            "OTHER": "OTHER"
+        }[reference_type]
+        legacy_stock_out_reason = (
+            reference_type
+            if reference_type in {
+                "DAMAGED",
+                "RETURN_TO_SUPPLIER",
+                "TRANSFER",
+                "LOST",
+                "OTHER"
+            }
+            else "OTHER"
+        )
+        stock_out_notes = f"Reason: {reference_type}"
+        if movement_remarks:
+            stock_out_notes = f"{stock_out_notes} | {movement_remarks}"
+
+        cursor.execute("""
+            INSERT INTO stock_out (
+                product_id,
+                quantity,
+                reason,
+                notes,
+                stock_out_date,
+                store_id,
+                stock_out_reason
+            )
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
+        """, (
+            item["product_id"],
+            quantity,
+            legacy_reason,
+            stock_out_notes,
+            store_id,
+            legacy_stock_out_reason
+        ))
+        stock_out_id = cursor.lastrowid
 
         # Removes stock.
         cursor.execute("""
@@ -793,8 +924,8 @@ def stock_out(inventory_id):
             previous_quantity,
             new_quantity,
             reference_type,
-            inventory_id,
-            remarks,
+            stock_out_id,
+            movement_remarks or None,
             store_id
         ))
 
@@ -802,12 +933,13 @@ def stock_out(inventory_id):
                          f"Stock out: {item.get('product_name') or ('Product #' + str(item['product_id']))} — -{quantity} units ({previous_quantity} → {new_quantity})",
                          get_jwt_identity() or None,
                          old_data={"stock_quantity": previous_quantity},
-                         new_data={"stock_quantity": new_quantity, "quantity": quantity, "reason": reference_type, "remarks": remarks})
+                         new_data={"stock_quantity": new_quantity, "quantity": quantity, "reason": reference_type, "reference_number": reference_number, "remarks": remarks})
         connection.commit()
 
         return jsonify({
             "message": "Stock removed successfully.",
-            "previous_quantity": previous_quantity,
+                           "stock_out_id": stock_out_id,
+                           "previous_quantity": previous_quantity,
             "new_quantity": new_quantity,
             "quantity_removed": quantity,
             "reason": reference_type
@@ -818,13 +950,10 @@ def stock_out(inventory_id):
         if connection:
             connection.rollback()
 
-        print(
-            "STOCK OUT ERROR:",
-            e
-        )
+        logging.getLogger(__name__).exception("Stock-out request failed")
 
         return jsonify({
-            "error": str(e)
+            "error": stock_out_error_message(e)
         }), 500
 
     finally:

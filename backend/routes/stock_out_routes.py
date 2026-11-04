@@ -1,8 +1,14 @@
+import logging
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt
 
 from backend.routes.user_routes import role_required
 from backend.database import get_db_connection
+from backend.services.stock_out_schema import (
+    ensure_stock_out_store_foreign_key,
+    stock_out_error_message,
+)
 
 
 # Creates the Blueprint for stock-out operations.
@@ -33,29 +39,36 @@ def create_stock_out():
     quantity = data.get("quantity")
 
     # Gets the stock-out reason.
-    stock_out_reason = data.get(
+    stock_out_reason = str(data.get(
         "stock_out_reason",
-        "OTHER"
-    ).strip().upper()
+        data.get("reference_type", "OTHER")
+    )).strip().upper()
 
     # Gets the optional reference number.
-    reference_number = data.get(
+    reference_number = str(data.get(
         "reference_number",
         ""
-    ).strip()
+    )).strip()
 
     # Gets the optional remarks.
-    remarks = data.get(
+    remarks = str(data.get(
         "remarks",
         ""
-    ).strip()
+    )).strip()
+    movement_remarks = remarks
+    if reference_number:
+        movement_remarks = f"Reference: {reference_number}"
+        if remarks:
+            movement_remarks = f"{movement_remarks} | {remarks}"
 
     # Defines the allowed stock-out reasons.
     allowed_reasons = [
+        "SALE",
         "DAMAGED",
         "RETURN_TO_SUPPLIER",
         "LOST",
         "TRANSFER",
+        "ADJUSTMENT",
         "OTHER"
     ]
 
@@ -106,6 +119,8 @@ def create_stock_out():
         # Gets a database connection.
         connection = get_db_connection()
 
+        ensure_stock_out_store_foreign_key(connection)
+
         # Starts a database transaction.
         connection.start_transaction()
 
@@ -139,6 +154,7 @@ def create_stock_out():
             FROM inventory
             WHERE product_id = %s
             AND store_id = %s
+            FOR UPDATE
         """, (
             product_id,
             store_id
@@ -169,6 +185,30 @@ def create_stock_out():
         # Calculates the remaining stock.
         new_quantity = previous_quantity - quantity
 
+        legacy_reason = {
+            "SALE": "SOLD",
+            "DAMAGED": "DAMAGED",
+            "RETURN_TO_SUPPLIER": "RETURNED_TO_SUPPLIER",
+            "TRANSFER": "OTHER",
+            "LOST": "LOST",
+            "ADJUSTMENT": "OTHER",
+            "OTHER": "OTHER"
+        }[stock_out_reason]
+        legacy_stock_out_reason = (
+            stock_out_reason
+            if stock_out_reason in {
+                "DAMAGED",
+                "RETURN_TO_SUPPLIER",
+                "TRANSFER",
+                "LOST",
+                "OTHER"
+            }
+            else "OTHER"
+        )
+        stock_out_notes = f"Reason: {stock_out_reason}"
+        if movement_remarks:
+            stock_out_notes = f"{stock_out_notes} | {movement_remarks}"
+
         cursor.close()
 
         # Creates a normal cursor for database changes.
@@ -179,19 +219,20 @@ def create_stock_out():
             INSERT INTO stock_out (
                 product_id,
                 quantity,
-                stock_out_reason,
-                reference_number,
-                remarks,
-                store_id
+                reason,
+                notes,
+                stock_out_date,
+                store_id,
+                stock_out_reason
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
         """, (
             product_id,
             quantity,
-            stock_out_reason,
-            reference_number if reference_number else None,
-            remarks if remarks else None,
-            store_id
+            legacy_reason,
+            stock_out_notes,
+            store_id,
+            legacy_stock_out_reason
         ))
 
         # Gets the newly created stock-out ID.
@@ -240,7 +281,7 @@ def create_stock_out():
             new_quantity,
             stock_out_reason,
             stock_out_id,
-            remarks if remarks else None,
+            movement_remarks if movement_remarks else None,
             store_id
         ))
 
@@ -262,8 +303,10 @@ def create_stock_out():
         if connection:
             connection.rollback()
 
+        logging.getLogger(__name__).exception("Stock-out request failed")
+
         return jsonify({
-            "error": str(e)
+            "error": stock_out_error_message(e)
         }), 500
 
     finally:
@@ -315,10 +358,11 @@ def get_stock_out_records():
                 p.sku,
                 p.part_number,
                 so.quantity,
+                so.reason,
                 so.stock_out_reason,
-                so.reference_number,
-                so.remarks,
-                so.created_at
+                NULL AS reference_number,
+                so.notes AS remarks,
+                so.stock_out_date AS created_at
             FROM stock_out so
             INNER JOIN products p
                 ON so.product_id = p.product_id
@@ -335,7 +379,7 @@ def get_stock_out_records():
                     p.product_name LIKE %s
                     OR p.sku LIKE %s
                     OR p.part_number LIKE %s
-                    OR so.reference_number LIKE %s
+                    OR so.notes LIKE %s
                 )
             """
 
@@ -359,7 +403,7 @@ def get_stock_out_records():
 
         # Shows the newest records first.
         sql += """
-            ORDER BY so.created_at DESC
+            ORDER BY so.stock_out_date DESC
         """
 
         cursor.execute(sql, tuple(params))
@@ -411,10 +455,11 @@ def get_stock_out_record(stock_out_id):
                 p.sku,
                 p.part_number,
                 so.quantity,
+                so.reason,
                 so.stock_out_reason,
-                so.reference_number,
-                so.remarks,
-                so.created_at
+                NULL AS reference_number,
+                so.notes AS remarks,
+                so.stock_out_date AS created_at
             FROM stock_out so
             INNER JOIN products p
                 ON so.product_id = p.product_id

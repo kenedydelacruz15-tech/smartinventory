@@ -26,10 +26,33 @@ def create_stock_in():
     product_id = data.get("product_id")
     quantity = data.get("quantity")
     supplier_id = data.get("supplier_id")
+    reference_type = str(
+        data.get("reference_type", data.get("stock_in_reason", "SUPPLIER"))
+    ).strip().upper()
+    reference_number = str(data.get("reference_number", "")).strip()
+    remarks = str(data.get("remarks", "")).strip()
+    movement_remarks = remarks
+    if reference_number:
+        movement_remarks = f"Reference: {reference_number}"
+        if remarks:
+            movement_remarks = f"{movement_remarks} | {remarks}"
+    allowed_reasons = [
+        "SUPPLIER",
+        "CUSTOMER_RETURN",
+        "TRANSFER",
+        "ADJUSTMENT",
+        "OTHER"
+    ]
 
     if not product_id or quantity is None:
         return jsonify({
             "error": "Product ID and quantity are required."
+        }), 400
+
+    if reference_type not in allowed_reasons:
+        return jsonify({
+            "error": "Invalid stock-in reason.",
+            "allowed_reasons": allowed_reasons
         }), 400
 
     try:
@@ -191,12 +214,16 @@ def create_stock_in():
                 quantity,
                 previous_quantity,
                 new_quantity,
+                reference_type,
                 reference_id,
+                remarks,
                 store_id
             )
             VALUES (
                 %s,
                 'STOCK_IN',
+                %s,
+                %s,
                 %s,
                 %s,
                 %s,
@@ -208,7 +235,9 @@ def create_stock_in():
             quantity,
             previous_quantity,
             new_quantity,
+            reference_type,
             stock_in_id,
+            movement_remarks or None,
             store_id
         ))
 
@@ -219,6 +248,8 @@ def create_stock_in():
             "stock_in_id": stock_in_id,
             "product_id": product_id,
             "supplier_id": supplier_id,
+            "reason": reference_type,
+            "reference_number": reference_number,
             "previous_quantity": previous_quantity,
             "added_quantity": quantity,
             "new_quantity": new_quantity

@@ -1,6 +1,32 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
 
+const STOCK_IN_REASONS = [
+  { value: "SUPPLIER", label: "Supplier restock / purchase" },
+  { value: "CUSTOMER_RETURN", label: "Customer return (sellable)" },
+  { value: "TRANSFER", label: "Transfer from another branch" },
+  { value: "ADJUSTMENT", label: "Physical count correction" },
+  { value: "OTHER", label: "Other" },
+];
+
+const STOCK_OUT_REASONS = [
+  { value: "SALE", label: "Sold to customer" },
+  { value: "DAMAGED", label: "Damaged / defective" },
+  { value: "RETURN_TO_SUPPLIER", label: "Returned to supplier" },
+  { value: "TRANSFER", label: "Transfer to another branch" },
+  { value: "LOST", label: "Lost / missing" },
+  { value: "ADJUSTMENT", label: "Physical count correction" },
+  { value: "OTHER", label: "Other" },
+];
+
+const formatMovementReason = (reason) =>
+  reason
+    ? reason
+        .toLowerCase()
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ")
+    : "Unspecified";
 
 function ProductThumbnail({ item }) {
   const imageUrl =
@@ -53,6 +79,7 @@ export default function Inventory() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -64,7 +91,12 @@ export default function Inventory() {
   const [movementType, setMovementType] = useState("");
   const [movementQuantity, setMovementQuantity] = useState("");
   const [movementReason, setMovementReason] = useState("");
+  const [movementSupplierId, setMovementSupplierId] = useState("");
+  const [movementReference, setMovementReference] = useState("");
   const [movementRemarks, setMovementRemarks] = useState("");
+  const [movementHistory, setMovementHistory] = useState([]);
+  const [movementHistoryError, setMovementHistoryError] = useState("");
+  const [movementHistoryLoading, setMovementHistoryLoading] = useState(false);
 
   // Adjust stock modal
   const [editItem, setEditItem] = useState(null);
@@ -103,9 +135,38 @@ export default function Inventory() {
     }
   };
 
+  const loadMovementHistory = async () => {
+    try {
+      setMovementHistoryLoading(true);
+      setMovementHistoryError("");
+      const res = await api.get("/api/stock-movements/", {
+        params: { limit: 100 },
+      });
+      setMovementHistory(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Stock movement history error:", err);
+      setMovementHistoryError(
+        err.response?.data?.error || "Failed to load stock movement history."
+      );
+    } finally {
+      setMovementHistoryLoading(false);
+    }
+  };
+
+  const loadSuppliers = async () => {
+    try {
+      const res = await api.get("/api/suppliers/");
+      setSuppliers(Array.isArray(res.data?.suppliers) ? res.data.suppliers : []);
+    } catch (err) {
+      console.error("Supplier list error:", err);
+    }
+  };
+
   useEffect(() => {
     loadInventory();
     loadCategories();
+    loadMovementHistory();
+    loadSuppliers();
   }, []);
 
   // Load active categories for the inventory category browser.
@@ -168,6 +229,8 @@ export default function Inventory() {
     setMovementType(type);
     setMovementQuantity("");
     setMovementReason("");
+    setMovementSupplierId("");
+    setMovementReference("");
     setMovementRemarks("");
   };
 
@@ -177,6 +240,8 @@ export default function Inventory() {
     setMovementType("");
     setMovementQuantity("");
     setMovementReason("");
+    setMovementSupplierId("");
+    setMovementReference("");
     setMovementRemarks("");
   };
 
@@ -191,8 +256,13 @@ export default function Inventory() {
       return;
     }
 
-    if (movementType === "STOCK_OUT" && !movementReason) {
-      alert("Please select a reason for Stock Out.");
+    if (!movementReason) {
+      alert(`Please select a reason for ${movementType === "STOCK_IN" ? "Stock In" : "Stock Out"}.`);
+      return;
+    }
+
+    if (movementType === "STOCK_IN" && movementReason === "SUPPLIER" && !movementSupplierId) {
+      alert("Select the supplier for this stock-in, or choose another stock-in reason.");
       return;
     }
 
@@ -206,25 +276,23 @@ export default function Inventory() {
 
       const payload = {
         quantity,
+        reference_type: movementReason,
+        supplier_id: movementSupplierId ? Number(movementSupplierId) : null,
+        reference_number: movementReference,
         remarks: movementRemarks,
       };
-
-      if (movementType === "STOCK_IN") {
-        payload.reference_type = "SUPPLIER";
-      } else {
-        payload.reference_type = movementReason;
-      }
 
       await api.post(endpoint, payload);
 
       alert(
         movementType === "STOCK_IN"
-          ? "Stock added successfully."
-          : "Stock removed successfully."
+          ? `Stock in recorded: ${formatMovementReason(movementReason)}.`
+          : `Stock out recorded: ${formatMovementReason(movementReason)}.`
       );
 
       closeMovement();
       await loadInventory();
+      await loadMovementHistory();
     } catch (err) {
       console.error("Stock movement error:", err);
 
@@ -272,6 +340,7 @@ export default function Inventory() {
 
       closeEdit();
       await loadInventory();
+      await loadMovementHistory();
     } catch (err) {
       console.error("Stock adjustment error:", err);
 
@@ -617,7 +686,7 @@ export default function Inventory() {
             )}
           </div>
 
-          <div className="table-container">
+          <div className="table-container inventory-products-table-wrap">
             <table className="data-table inventory-products-table">
               <thead>
                 <tr>
@@ -626,7 +695,7 @@ export default function Inventory() {
                   <th>Price</th>
                   <th>Stock</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th className="inventory-actions-column">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -674,21 +743,21 @@ export default function Inventory() {
                           <span className="status-badge success">In Stock</span>
                         )}
                       </td>
-                      <td>
+                      <td className="inventory-actions-column">
                         <div className="action-buttons">
                           {(item.is_active === true || Number(item.is_active) === 1) ? (
                             <>
                               <button type="button" className="btn-success" onClick={() => openMovement(item, "STOCK_IN")}>Stock In</button>
                               <button type="button" className="btn-warning" onClick={() => openMovement(item, "STOCK_OUT")}>Stock Out</button>
                               <button type="button" className="btn-primary" onClick={() => openEdit(item)}>Adjust</button>
-                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Compatibility</button>
+                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Fitment</button>
                               <button type="button" className="btn-danger" onClick={() => deactivateItem(item)}>Deactivate</button>
                             </>
                           ) : (
                             <>
                               <button type="button" className="btn-primary" onClick={() => restoreItem(item)}>Restore</button>
-                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Compatibility</button>
-                              <button type="button" className="btn-danger" onClick={() => permanentlyDeleteItem(item)}>Permanently Delete</button>
+                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Fitment</button>
+                              <button type="button" className="btn-danger" onClick={() => permanentlyDeleteItem(item)}>Delete</button>
                             </>
                           )}
                         </div>
@@ -701,6 +770,85 @@ export default function Inventory() {
           </div>
         </section>
       </div>
+
+      <section
+        className="dashboard-panel"
+        style={{ marginTop: 24, overflow: "hidden" }}
+      >
+        <div
+          className="dashboard-panel-title"
+          style={{ padding: "18px 20px", justifyContent: "space-between" }}
+        >
+          <div>
+            <i className="bi bi-arrow-left-right" />
+            <strong>Recent Stock Movement History</strong>
+          </div>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={loadMovementHistory}
+            disabled={movementHistoryLoading}
+          >
+            {movementHistoryLoading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+        <p style={{ margin: "0 20px 14px", color: "var(--muted, #64748b)", fontSize: 13 }}>
+          Sales, supplier returns, damaged items, branch transfers, and other stock changes are listed separately.
+        </p>
+        {movementHistoryError && (
+          <div className="error-message" style={{ margin: "0 20px 14px" }}>
+            {movementHistoryError}
+          </div>
+        )}
+        <div className="table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Product</th>
+                <th>Movement</th>
+                <th>Reason / Destination</th>
+                <th>Quantity</th>
+                <th>Stock Before → After</th>
+                <th>Reference / Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movementHistoryLoading && movementHistory.length === 0 ? (
+                <tr><td colSpan="7" className="empty-state">Loading stock movement history...</td></tr>
+              ) : movementHistory.length === 0 ? (
+                <tr><td colSpan="7" className="empty-state">No stock movements recorded yet.</td></tr>
+              ) : (
+                movementHistory.map((movement) => {
+                  const isStockIn = movement.movement_type === "STOCK_IN";
+                  return (
+                    <tr key={movement.movement_id}>
+                      <td>{movement.created_at ? new Date(movement.created_at).toLocaleString() : "—"}</td>
+                      <td>
+                        <strong>{movement.product_name || "Unknown product"}</strong>
+                        <small style={{ display: "block", color: "var(--muted, #64748b)" }}>
+                          {movement.sku || movement.part_number || "—"}
+                        </small>
+                      </td>
+                      <td>
+                        <span className={`status-badge ${isStockIn ? "success" : "warning"}`}>
+                          {isStockIn ? "Stock In" : "Stock Out"}
+                        </span>
+                      </td>
+                      <td>{formatMovementReason(movement.reference_type || movement.movement_type)}</td>
+                      <td style={{ fontWeight: 700, color: isStockIn ? "var(--green-dark, #16804a)" : "var(--red, #b42318)" }}>
+                        {isStockIn ? "+" : "-"}{Number(movement.quantity || 0).toLocaleString()}
+                      </td>
+                      <td>{movement.previous_quantity} → {movement.new_quantity}</td>
+                      <td style={{ whiteSpace: "pre-wrap" }}>{movement.remarks || "—"}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* ============================= */}
       {/* STOCK IN / STOCK OUT MODAL */}
@@ -732,6 +880,12 @@ export default function Inventory() {
               </span>
             </div>
 
+            <p className="modal-help">
+              {movementType === "STOCK_IN"
+                ? "Choose where the incoming items came from. Each entry is saved to stock-in records and movement history."
+                : "Choose where the outgoing items went. Sales and damaged/defective items will be separately identifiable in movement history."}
+            </p>
+
             <label>
               Quantity
             </label>
@@ -747,47 +901,53 @@ export default function Inventory() {
               autoFocus
             />
 
-            {movementType === "STOCK_OUT" && (
+            <label>Reason / destination</label>
+            <select
+              value={movementReason}
+              onChange={(e) => setMovementReason(e.target.value)}
+            >
+              <option value="">Select reason</option>
+              {(movementType === "STOCK_IN" ? STOCK_IN_REASONS : STOCK_OUT_REASONS).map((reason) => (
+                <option key={reason.value} value={reason.value}>{reason.label}</option>
+              ))}
+            </select>
+
+            {movementType === "STOCK_IN" && movementReason === "SUPPLIER" && (
               <>
-                <label>
-                  Reason
-                </label>
-
+                <label>Supplier</label>
                 <select
-                  value={movementReason}
-                  onChange={(e) =>
-                    setMovementReason(e.target.value)
-                  }
+                  value={movementSupplierId}
+                  onChange={(e) => setMovementSupplierId(e.target.value)}
                 >
-                  <option value="">
-                    Select reason
-                  </option>
-
-                  <option value="DAMAGED">
-                    Damaged
-                  </option>
-
-                  <option value="LOST">
-                    Lost
-                  </option>
-
-                  <option value="ADJUSTMENT">
-                    Adjustment
-                  </option>
-
-                  <option value="OTHER">
-                    Other
-                  </option>
+                  <option value="">Select supplier</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.supplier_id} value={supplier.supplier_id}>
+                      {supplier.supplier_name}
+                    </option>
+                  ))}
                 </select>
+                {suppliers.length === 0 && (
+                  <p className="modal-help">No suppliers found. Add a supplier first or choose another stock-in reason.</p>
+                )}
               </>
             )}
 
             <label>
-              Remarks
+              {movementType === "STOCK_IN" ? "Delivery / return reference (optional)" : "Receipt / transfer reference (optional)"}
+            </label>
+            <input
+              type="text"
+              placeholder={movementType === "STOCK_OUT" && movementReason === "SALE" ? "e.g. sales receipt or invoice number" : "e.g. receipt, return, or transfer number"}
+              value={movementReference}
+              onChange={(e) => setMovementReference(e.target.value)}
+            />
+
+            <label>
+              Notes
             </label>
 
             <textarea
-              placeholder="Optional remarks..."
+              placeholder="Optional details about this stock movement..."
               value={movementRemarks}
               onChange={(e) =>
                 setMovementRemarks(e.target.value)

@@ -1,7 +1,50 @@
 """Detailed audit logging helper for SmartInventory."""
 import json
+from threading import Lock
+
 from flask_jwt_extended import get_jwt
 from backend.database import get_db_connection
+
+_audit_schema_lock = Lock()
+_audit_schema_ready = False
+
+
+def ensure_audit_logs_table(connection):
+    """Create the audit table on existing databases that predate audit logging."""
+    global _audit_schema_ready
+
+    if _audit_schema_ready:
+        return
+
+    with _audit_schema_lock:
+        if _audit_schema_ready:
+            return
+
+        cursor = connection.cursor()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    log_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    actor_user_id INT NULL,
+                    actor_name VARCHAR(100) NULL,
+                    actor_role VARCHAR(20) NULL,
+                    store_id INT NULL,
+                    event_category VARCHAR(40) NOT NULL,
+                    action VARCHAR(80) NOT NULL,
+                    entity_type VARCHAR(50) NULL,
+                    entity_id VARCHAR(100) NULL,
+                    description TEXT NULL,
+                    details LONGTEXT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (log_id),
+                    INDEX idx_audit_logs_store_created (store_id, created_at),
+                    INDEX idx_audit_logs_action_created (action, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            connection.commit()
+            _audit_schema_ready = True
+        finally:
+            cursor.close()
 
 
 def _json_payload(old_data=None, new_data=None):
@@ -29,6 +72,7 @@ def create_audit_log(store_id, action, entity_type, entity_id=None, description=
     connection = cursor = actor_cursor = None
     try:
         connection = get_db_connection()
+        ensure_audit_logs_table(connection)
         actor_name = None
         actor_role = None
         if user_id is not None:

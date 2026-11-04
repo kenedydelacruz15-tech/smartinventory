@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import api from "../services/api";
 
+const PRODUCT_QR_PREFIX = "SMARTINVENTORY:PRODUCT:";
+const QR_LABELS_PER_PAGE = 12;
+
 const emptyForm = {
   product_name: "",
   sku: "",
@@ -29,6 +32,8 @@ export default function Products() {
   const [loading, setLoading] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [qrPdfLoading, setQrPdfLoading] = useState(false);
+  const [lastCreatedProduct, setLastCreatedProduct] = useState(null);
   const [lookupResult, setLookupResult] = useState(null);
   const [duplicateProduct, setDuplicateProduct] = useState(null);
   const [duplicateOverride, setDuplicateOverride] = useState(false);
@@ -284,14 +289,36 @@ export default function Products() {
               decodedText
             );
 
+            // Stop camera
+            await stopScanner();
+
+            if (decodedText.startsWith(PRODUCT_QR_PREFIX)) {
+              const productId = Number(
+                decodedText.slice(PRODUCT_QR_PREFIX.length)
+              );
+              if (!Number.isInteger(productId) || productId <= 0) {
+                setError("This SmartInventory QR code is invalid.");
+                return;
+              }
+
+              try {
+                const res = await api.get(`/api/products/${productId}`);
+                handleEdit(res.data);
+                setSuccess(`Product QR found: ${res.data.product_name}.`);
+              } catch (err) {
+                setError(
+                  err.response?.data?.error ||
+                    "This QR code does not match a product in your store."
+                );
+              }
+              return;
+            }
+
             // Put scanned barcode into the form
             setForm((prev) => ({
               ...prev,
               barcode: decodedText,
             }));
-
-            // Stop camera
-            await stopScanner();
 
             // Automatically look up the barcode
             await handleBarcodeLookup(decodedText);
@@ -444,6 +471,7 @@ export default function Products() {
 
     try {
       setLoading(true);
+      setLastCreatedProduct(null);
 
       if (editingId !== null) {
         await api.put(
@@ -455,11 +483,15 @@ export default function Products() {
           "Product updated successfully."
         );
       } else {
-        await api.post(
+        const res = await api.post(
           "/api/products/",
           productData
         );
 
+        setLastCreatedProduct({
+          ...productData,
+          product_id: res.data.product_id,
+        });
         setSuccess(
           "Product added successfully."
         );
@@ -482,6 +514,100 @@ export default function Products() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadQrPdf = async (productsToPrint, filename) => {
+    if (!productsToPrint.length) {
+      setError("There are no products to include in a QR label PDF.");
+      return;
+    }
+
+    try {
+      setQrPdfLoading(true);
+      setError("");
+
+      const [{ default: QRCode }, { jsPDF }] = await Promise.all([
+        import("qrcode"),
+        import("jspdf"),
+      ]);
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const columns = 3;
+      const rows = 4;
+      const margin = 8;
+      const gap = 3;
+      const cellWidth = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+      const cellHeight = (pageHeight - margin * 2 - gap * (rows - 1)) / rows;
+      const qrSize = 35;
+
+      for (let index = 0; index < productsToPrint.length; index += 1) {
+        if (index > 0 && index % QR_LABELS_PER_PAGE === 0) {
+          pdf.addPage();
+        }
+
+        const product = productsToPrint[index];
+        const position = index % QR_LABELS_PER_PAGE;
+        const column = position % columns;
+        const row = Math.floor(position / columns);
+        const x = margin + column * (cellWidth + gap);
+        const y = margin + row * (cellHeight + gap);
+        const productQr = await QRCode.toDataURL(
+          `${PRODUCT_QR_PREFIX}${product.product_id}`,
+          {
+            errorCorrectionLevel: "M",
+            margin: 2,
+            width: 192,
+            color: { dark: "#000000", light: "#ffffff" },
+          }
+        );
+
+        pdf.setDrawColor(190);
+        pdf.roundedRect(x, y, cellWidth, cellHeight, 2, 2);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8);
+        const productName = pdf
+          .splitTextToSize(product.product_name || "Unnamed product", cellWidth - 8)
+          .slice(0, 2);
+        pdf.text(productName, x + 4, y + 6);
+        pdf.addImage(
+          productQr,
+          "PNG",
+          x + (cellWidth - qrSize) / 2,
+          y + 14,
+          qrSize,
+          qrSize
+        );
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7);
+        pdf.text(`SKU: ${product.sku || "-"}`, x + 4, y + 54);
+        pdf.text(
+          `Product ID: ${product.product_id}`,
+          x + 4,
+          y + 59
+        );
+        if (product.barcode) {
+          pdf.text(
+            `Barcode: ${product.barcode}`,
+            x + 4,
+            y + 64
+          );
+        }
+      }
+
+      pdf.save(filename);
+      setLastCreatedProduct(null);
+      setSuccess(`QR label PDF downloaded for ${productsToPrint.length} product${productsToPrint.length === 1 ? "" : "s"}.`);
+    } catch (err) {
+      console.error("QR label PDF generation error:", err);
+      setError("Could not generate the QR label PDF. Please try again.");
+    } finally {
+      setQrPdfLoading(false);
     }
   };
 
@@ -872,6 +998,22 @@ export default function Products() {
       {success && (
         <div className="alert success">
           {success}
+          {lastCreatedProduct && (
+            <button
+              type="button"
+              className="action-button"
+              onClick={() =>
+                downloadQrPdf(
+                  [lastCreatedProduct],
+                  `smartinventory-product-${lastCreatedProduct.product_id}-qr-label.pdf`
+                )
+              }
+              disabled={qrPdfLoading}
+              style={{ marginLeft: 12 }}
+            >
+              {qrPdfLoading ? "Preparing QR PDF..." : "Download QR label PDF"}
+            </button>
+          )}
         </div>
       )}
 
@@ -1491,6 +1633,20 @@ export default function Products() {
 
         </div>
 
+        <button
+          type="button"
+          className="primary"
+          onClick={() =>
+            downloadQrPdf(products, "smartinventory-product-qr-labels.pdf")
+          }
+          disabled={qrPdfLoading || loadingProducts || products.length === 0}
+          title="Download printable QR labels for products currently shown in this list"
+        >
+          {qrPdfLoading
+            ? "Preparing QR PDF..."
+            : `Download QR Labels PDF (${products.length})`}
+        </button>
+
       </div>
 
       {/* =====================================================
@@ -1696,6 +1852,22 @@ export default function Products() {
                           </span>
 
                           Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          className="action-button"
+                          onClick={() =>
+                            downloadQrPdf(
+                              [product],
+                              `smartinventory-product-${product.product_id}-qr-label.pdf`
+                            )
+                          }
+                          disabled={qrPdfLoading}
+                          title={`Download QR label for ${product.product_name}`}
+                        >
+                          <i className="bi bi-qr-code" aria-hidden="true" />
+                          QR PDF
                         </button>
 
                         {/* Status and vehicle compatibility are managed in Inventory. */}

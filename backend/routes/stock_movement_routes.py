@@ -55,6 +55,17 @@ def get_stock_movements():
         "reference_type",
         ""
     ).strip().upper()
+    limit = request.args.get("limit")
+
+    if limit is not None:
+        try:
+            limit = int(limit)
+            if limit < 1 or limit > 500:
+                raise ValueError
+        except ValueError:
+            return jsonify({
+                "error": "Limit must be a number between 1 and 500."
+            }), 400
 
     connection = None
     cursor = None
@@ -84,7 +95,7 @@ def get_stock_movements():
                 sm.reference_id,
                 sm.remarks,
                 sm.store_id,
-                sm.created_at
+                sm.movement_date AS created_at
             FROM stock_movements sm
             INNER JOIN products p
                 ON sm.product_id = p.product_id
@@ -152,7 +163,11 @@ def get_stock_movements():
             params.append(reference_type)
 
         # Shows the newest movements first.
-        sql += " ORDER BY sm.created_at DESC"
+        sql += " ORDER BY sm.movement_date DESC"
+
+        if limit is not None:
+            sql += " LIMIT %s"
+            params.append(limit)
 
         # Executes the query.
         cursor.execute(sql, tuple(params))
@@ -233,7 +248,7 @@ def get_stock_movement(movement_id):
                 sm.reference_id,
                 sm.remarks,
                 sm.store_id,
-                sm.created_at
+                sm.movement_date AS created_at
             FROM stock_movements sm
             INNER JOIN products p
                 ON sm.product_id = p.product_id
