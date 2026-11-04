@@ -23,6 +23,8 @@ import AdminSettings from "./pages/AdminSettings";
 import AuditLogs from "./pages/AuditLogs";
 import Analytics from "./pages/Analytics";
 import LandingPage from "./pages/LandingPage";
+import Reports from "./pages/Reports";
+import NotificationsBell from "./components/NotificationsBell";
 
 import {
   getDashboardPath,
@@ -67,6 +69,7 @@ const navItems = {
     ["Categories", "/categories", "bi-grid"],
     ["Staff", "/staff", "bi-person-badge"],
     ["Analytics", "/analytics", "bi-bar-chart-line"],
+    ["Reports", "/reports", "bi-file-earmark-bar-graph"],
     ["Audit Logs", "/owner/audit-logs", "bi-clipboard-data"],
     ["Store Settings", "/settings/store", "bi-gear"],
   ],
@@ -219,6 +222,7 @@ function Layout() {
           </div>
 
           <div className="topbar-right">
+            {["OWNER", "STAFF"].includes(role) && <NotificationsBell />}
             <button
               className="theme-toggle"
               type="button"
@@ -293,6 +297,15 @@ function Layout() {
               element={
                 <Protected roles={["OWNER", "STAFF"]}>
                   <Inventory />
+                </Protected>
+              }
+            />
+
+            <Route
+              path="/reports"
+              element={
+                <Protected roles={["OWNER"]}>
+                  <Reports />
                 </Protected>
               }
             />

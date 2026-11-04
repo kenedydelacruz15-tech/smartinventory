@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../services/api";
+import StockActivityAnalytics from "../components/StockActivityAnalytics";
 
 export default function OwnerDashboard() {
   const [setup, setSetup] = useState(null);
   const [summary, setSummary] = useState(null);
   const [categoryStock, setCategoryStock] = useState([]);
   const [inventoryStatus, setInventoryStatus] = useState([]);
-  const [stockMovements, setStockMovements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -20,20 +20,18 @@ export default function OwnerDashboard() {
       setLoading(true);
       setError("");
 
-      const [setupRes, summaryRes, categoryRes, statusRes, movementRes] =
+      const [setupRes, summaryRes, categoryRes, statusRes] =
         await Promise.all([
           api.get("/api/store/setup-status"),
           api.get("/api/dashboard/summary"),
           api.get("/api/dashboard/charts/category-stock"),
-          api.get("/api/dashboard/charts/inventory-status"),
-          api.get("/api/dashboard/charts/stock-movements?days=7")
+          api.get("/api/dashboard/charts/inventory-status")
         ]);
 
       setSetup(setupRes.data || {});
       setSummary(summaryRes.data || {});
       setCategoryStock(categoryRes.data?.data || []);
       setInventoryStatus(statusRes.data?.data || []);
-      setStockMovements(movementRes.data?.data || []);
     } catch (err) {
       console.error("Could not load dashboard:", err);
       setError(err.response?.data?.error || "Could not load dashboard data.");
@@ -45,11 +43,6 @@ export default function OwnerDashboard() {
   const statusCount = (status) => {
     const item = inventoryStatus.find((row) => row.stock_status === status);
     return Number(item?.product_count || 0);
-  };
-
-  const movementCount = (type) => {
-    const item = stockMovements.find((row) => row.movement_type === type);
-    return Number(item?.total_quantity || 0);
   };
 
   const categoryTotal = useMemo(
@@ -109,20 +102,15 @@ export default function OwnerDashboard() {
           <strong>{loading ? "..." : summary?.inventory?.out_of_stock ?? 0}</strong>
           <small>Zero stock products</small>
         </div>
-        <div className="dashboard-kpi purple">
-          <span><i className="bi bi-bell" /> Alerts</span>
-          <strong>{loading ? "..." : summary?.unread_alerts ?? 0}</strong>
-          <small>Items needing action</small>
-        </div>
         <div className="dashboard-kpi cyan">
           <span><i className="bi bi-box-arrow-in-down" /> Stock In</span>
-          <strong>{loading ? "..." : movementCount("STOCK_IN")}</strong>
-          <small>Units added · 7 days</small>
+          <strong>{loading ? "..." : summary?.stock_in_7_days ?? 0}</strong>
+          <small>Units added · last 7 days</small>
         </div>
         <div className="dashboard-kpi teal">
           <span><i className="bi bi-box-arrow-up" /> Stock Out</span>
-          <strong>{loading ? "..." : movementCount("STOCK_OUT")}</strong>
-          <small>Units removed · 7 days</small>
+          <strong>{loading ? "..." : summary?.stock_out_7_days ?? 0}</strong>
+          <small>Units removed · last 7 days</small>
         </div>
         <div className="dashboard-kpi dark">
           <span><i className="bi bi-grid" /> Categories</span>
@@ -142,31 +130,6 @@ export default function OwnerDashboard() {
       <div className="dashboard-main-grid">
         <div className="dashboard-panel">
           <div className="dashboard-panel-title">
-            <div><i className="bi bi-bar-chart-fill" /><strong>Stock Movement</strong></div>
-            <span>Last 7 days</span>
-          </div>
-
-          <div className="movement-visual">
-            <div className="movement-column">
-              <div className="movement-bar in" style={{ height: `${Math.max(14, Math.min(100, movementCount("STOCK_IN") / Math.max(movementCount("STOCK_IN"), movementCount("STOCK_OUT"), 1) * 100))}%` }} />
-              <strong>{movementCount("STOCK_IN").toLocaleString()}</strong>
-              <small>Stock In</small>
-            </div>
-            <div className="movement-column">
-              <div className="movement-bar out" style={{ height: `${Math.max(14, Math.min(100, movementCount("STOCK_OUT") / Math.max(movementCount("STOCK_IN"), movementCount("STOCK_OUT"), 1) * 100))}%` }} />
-              <strong>{movementCount("STOCK_OUT").toLocaleString()}</strong>
-              <small>Stock Out</small>
-            </div>
-            <div className="movement-summary">
-              <span>Net movement</span>
-              <strong>{(movementCount("STOCK_IN") - movementCount("STOCK_OUT")).toLocaleString()} units</strong>
-              <small>Based on recorded stock movements</small>
-            </div>
-          </div>
-        </div>
-
-        <div className="dashboard-panel">
-          <div className="dashboard-panel-title">
             <div><i className="bi bi-pie-chart-fill" /><strong>Inventory Status</strong></div>
             <span>{loading ? "Loading..." : `${summary?.total_products ?? 0} products`}</span>
           </div>
@@ -178,6 +141,8 @@ export default function OwnerDashboard() {
           </div>
         </div>
       </div>
+
+      <StockActivityAnalytics />
 
       <div className="dashboard-two-column">
         <div className="dashboard-panel dashboard-table-panel">

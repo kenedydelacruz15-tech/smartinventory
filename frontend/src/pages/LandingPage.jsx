@@ -4,67 +4,68 @@ import "./LandingTypography.css";
 import "./LandingFeaturesScale.css";
 import "./MotorpartsLanding.css";
 
-const parts = [
+const inventoryFeatures = [
   {
-    icon: "bi-gear-wide-connected",
-    title: "Engine & Tune-up",
-    description: "Parts for routine servicing, repairs, and engine maintenance.",
+    icon: "bi-box-seam",
+    title: "Product inventory",
+    description: "Keep products, categories, and current stock levels organized in one place.",
   },
   {
-    icon: "bi-disc",
-    title: "Brakes & Suspension",
-    description: "Explore components that help keep your motorcycle controlled and road-ready.",
+    icon: "bi-arrow-down-up",
+    title: "Stock movements",
+    description: "Record stock in and stock out, with reasons and timestamps for each movement.",
   },
   {
-    icon: "bi-lightning-charge",
-    title: "Electrical & Lighting",
-    description: "Find electrical and lighting parts for common replacement needs.",
+    icon: "bi-bell",
+    title: "Low-stock alerts",
+    description: "See products that need attention before they run out.",
   },
   {
-    icon: "bi-wrench-adjustable",
-    title: "Drive & Maintenance",
-    description: "Everyday parts and essentials for upkeep and repairs.",
+    icon: "bi-file-earmark-bar-graph",
+    title: "Reports",
+    description: "Review inventory valuation and stock movement history.",
   },
 ];
 
 const reasons = [
   {
     icon: "bi-search",
-    title: "Find the right part",
-    description: "Start with the part category, then check fitment for your motorcycle.",
+    title: "One inventory workspace",
+    description: "Manage products and stock from a single workspace for your motorparts shop.",
   },
   {
-    icon: "bi-tools",
-    title: "For repairs and upkeep",
-    description: "Parts for the regular maintenance and repair work that keeps a bike moving.",
+    icon: "bi-clock-history",
+    title: "Trace stock activity",
+    description: "Review stock-in and stock-out activity with the date, reason, and quantity.",
   },
   {
-    icon: "bi-shop",
-    title: "A local motorparts shop",
-    description: "KEN Motorparts is focused on motorcycle parts and the riders who need them.",
+    icon: "bi-people",
+    title: "Owner and staff access",
+    description: "Give your team role-based access to the inventory tools they need.",
   },
 ];
 
 function MotorpartsShowcase() {
   return (
-    <div className="motorparts-showcase" aria-label="Motorcycle parts at KEN Motorparts">
+    <div className="motorparts-showcase inventory-showcase" aria-label="SmartInventory dashboard preview">
       <div className="motorparts-showcase-heading">
+        <span><i className="bi bi-box-seam" /> INVENTORY OVERVIEW</span>
+        <small>Dashboard preview</small>
+      </div>
+      <div className="inventory-preview-metrics">
+        <div><span>Total products</span><strong>Product catalog</strong><small><i className="bi bi-box-seam" /> Organized by category</small></div>
+        <div><span>Stock levels</span><strong>At a glance</strong><small><i className="bi bi-bar-chart-line" /> Current quantities</small></div>
+        <div><span>Stock activity</span><strong>In and out</strong><small><i className="bi bi-arrow-down-up" /> Recorded movements</small></div>
+      </div>
+      <div className="inventory-preview-list">
+        <div className="inventory-preview-list-heading"><strong>Inventory status</strong><span>Live in your workspace</span></div>
+        <div><i className="bi bi-check-circle-fill" /><span>In stock</span><b>Available</b></div>
+        <div><i className="bi bi-exclamation-circle-fill" /><span>Needs attention</span><b>Reorder alert</b></div>
+        <div><i className="bi bi-clock-history" /><span>Recent activity</span><b>Timestamped</b></div>
+      </div>
+      <div className="inventory-preview-footer">
         <span><i className="bi bi-shop" /> KEN MOTORPARTS</span>
-        <i className="bi bi-three-dots" aria-hidden="true" />
-      </div>
-      <div className="motorparts-showcase-main">
-        <div className="motorparts-showcase-icon">
-          <i className="bi bi-gear-wide-connected" />
-        </div>
-        <span className="motorparts-showcase-kicker">PARTS FOR EVERYDAY RIDES</span>
-        <h2>Keep your motorcycle moving.</h2>
-        <p>Explore parts for maintenance, repairs, and your next upgrade.</p>
-      </div>
-      <div className="motorparts-showcase-tags">
-        <span><i className="bi bi-gear" /> Engine</span>
-        <span><i className="bi bi-disc" /> Brakes</span>
-        <span><i className="bi bi-lightning" /> Electrical</span>
-        <span><i className="bi bi-wrench" /> Maintenance</span>
+        <span>Product and stock management</span>
       </div>
     </div>
   );
@@ -80,7 +81,7 @@ export default function LandingPage() {
         </a>
         <nav aria-label="Main navigation">
           <a href="#home">Home</a>
-          <a href="#parts">Parts</a>
+          <a href="#parts">Inventory</a>
           <a href="#about">About</a>
         </nav>
         <Link className="smart-home-login" to="/login">
@@ -96,22 +97,19 @@ export default function LandingPage() {
         />
         <div className="smart-home-hero-inner">
           <div className="smart-home-copy">
-            <span className="smart-home-eyebrow">KEN MOTORPARTS · MOTORCYCLE PARTS</span>
-            <h1>Find the parts<br />to keep you <span>moving.</span></h1>
+            <span className="smart-home-eyebrow">KEN MOTORPARTS · INVENTORY MANAGEMENT</span>
+            <h1>Know your stock.<br />Keep your shop <span>moving.</span></h1>
             <p>
-              From routine maintenance to your next repair, KEN Motorparts is
-              your neighborhood shop for motorcycle parts and essentials.
+              Track products, stock levels, and daily movements with one clear
+              inventory workspace built for your motorparts shop.
             </p>
             <div className="smart-home-actions">
-              <Link className="smart-home-primary" to="/login">
-                Login <i className="bi bi-arrow-right" />
-              </Link>
-              <a className="smart-home-secondary" href="#about">About KEN Motorparts</a>
+              <a className="smart-home-secondary" href="#parts">Explore inventory features <i className="bi bi-arrow-down" /></a>
             </div>
             <div className="smart-home-highlights">
-              <span><i className="bi bi-gear" /><b>Maintenance</b></span>
-              <span><i className="bi bi-tools" /><b>Repairs</b></span>
-              <span><i className="bi bi-lightning" /><b>Upgrades</b></span>
+              <span><i className="bi bi-box-seam" /><b>Products</b></span>
+              <span><i className="bi bi-arrow-down-up" /><b>Stock activity</b></span>
+              <span><i className="bi bi-bell" /><b>Alerts</b></span>
             </div>
           </div>
           <div className="smart-home-visual">
@@ -121,41 +119,39 @@ export default function LandingPage() {
       </section>
 
       <section className="smart-home-benefits motorparts-benefits">
-        <p>Motorcycle parts and essentials for the road ahead</p>
+        <p>Everything you need to keep your store inventory in view</p>
         <div>
-          <span><i className="bi bi-gear-wide-connected" /> Engine Parts</span>
-          <span><i className="bi bi-disc" /> Brakes &amp; Suspension</span>
-          <span><i className="bi bi-lightning-charge" /> Electrical</span>
-          <span><i className="bi bi-wrench-adjustable" /> Maintenance</span>
+          <span><i className="bi bi-box-seam" /> Products</span>
+          <span><i className="bi bi-arrow-down-up" /> Stock In &amp; Out</span>
+          <span><i className="bi bi-bell" /> Reorder Alerts</span>
+          <span><i className="bi bi-file-earmark-bar-graph" /> Reports</span>
         </div>
       </section>
 
       <section className="smart-home-features motorparts-parts" id="parts">
         <div className="smart-home-section-heading">
-          <span>WHAT YOU'RE LOOKING FOR</span>
-          <h2>Parts for your bike, all in one place</h2>
-          <p>Explore common motorcycle part categories for servicing, repairs, and upgrades.</p>
+          <span>INVENTORY AT A GLANCE</span>
+          <h2>Your stock, all in one place</h2>
+          <p>Tools to help your team manage products, stock activity, and replenishment.</p>
         </div>
         <div className="smart-home-feature-grid">
-          {parts.map((part) => (
-            <article className="smart-home-feature" key={part.title}>
-              <i className={`bi ${part.icon}`} />
-              <div><h3>{part.title}</h3><p>{part.description}</p></div>
+          {inventoryFeatures.map((feature) => (
+            <article className="smart-home-feature" key={feature.title}>
+              <i className={`bi ${feature.icon}`} />
+              <div><h3>{feature.title}</h3><p>{feature.description}</p></div>
             </article>
           ))}
         </div>
-        <p className="motorparts-availability-note">
-          Product availability and motorcycle fitment may vary. Ask the shop about a specific part.
-        </p>
+        <p className="motorparts-availability-note">Inventory updates are recorded by your team in the SmartInventory workspace.</p>
       </section>
 
       <section className="smart-home-steps motorparts-about" id="about">
         <div className="smart-home-section-heading">
-          <span>ABOUT KEN MOTORPARTS</span>
-          <h2>A motorparts shop built around your ride</h2>
+          <span>ABOUT SMARTINVENTORY</span>
+          <h2>Built around your store's daily stock work</h2>
           <p>
-            Whether you are keeping up with maintenance, fixing a worn part, or
-            planning an upgrade, start with the parts your motorcycle needs.
+            Keep your product catalog, stock levels, and movement history organized
+            as your team serves customers and replenishes stock.
           </p>
         </div>
         <div className="smart-home-step-grid">
@@ -167,13 +163,12 @@ export default function LandingPage() {
             </article>
           ))}
         </div>
-        <div className="smart-home-cta">
+        <div className="smart-home-cta inventory-home-cta">
           <div>
             <span>KEN MOTORPARTS INVENTORY</span>
-            <h2>Manage your motorparts inventory.</h2>
-            <p>Sign in to access the inventory workspace.</p>
+            <h2>A clearer view of your inventory.</h2>
+            <p>Products, stock status, and activity in one workspace.</p>
           </div>
-          <Link to="/login">Login <i className="bi bi-arrow-right" /></Link>
         </div>
       </section>
 
@@ -183,9 +178,8 @@ export default function LandingPage() {
           <span>KEN MOTORPARTS<small>MOTORCYCLE PARTS &amp; ACCESSORIES</small></span>
         </a>
         <nav aria-label="Footer navigation">
-          <a href="#parts">Parts</a>
+          <a href="#parts">Inventory</a>
           <a href="#about">About</a>
-          <Link to="/login">Login</Link>
         </nav>
         <small>© {new Date().getFullYear()} KEN Motorparts. All rights reserved.</small>
       </footer>

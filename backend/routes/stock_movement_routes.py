@@ -1,3 +1,5 @@
+from datetime import date
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt
 
@@ -55,7 +57,28 @@ def get_stock_movements():
         "reference_type",
         ""
     ).strip().upper()
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+    include_summary = request.args.get("include_summary", "").lower() == "true"
     limit = request.args.get("limit")
+
+    parsed_start_date = None
+    parsed_end_date = None
+
+    try:
+        if start_date:
+            parsed_start_date = date.fromisoformat(start_date)
+        if end_date:
+            parsed_end_date = date.fromisoformat(end_date)
+    except ValueError:
+        return jsonify({
+            "error": "Dates must use YYYY-MM-DD format."
+        }), 400
+
+    if parsed_start_date and parsed_end_date and parsed_start_date > parsed_end_date:
+        return jsonify({
+            "error": "start_date must be on or before end_date."
+        }), 400
 
     if limit is not None:
         try:
@@ -162,8 +185,19 @@ def get_stock_movements():
             sql += " AND sm.reference_type = %s"
             params.append(reference_type)
 
+        if parsed_start_date:
+            sql += " AND sm.movement_date >= %s"
+            params.append(parsed_start_date)
+
+        if parsed_end_date:
+            sql += " AND sm.movement_date < DATE_ADD(%s, INTERVAL 1 DAY)"
+            params.append(parsed_end_date)
+
+        filtered_sql = sql
+        filtered_params = tuple(params)
+
         # Shows the newest movements first.
-        sql += " ORDER BY sm.movement_date DESC"
+        sql += " ORDER BY sm.movement_date DESC, sm.movement_id DESC"
 
         if limit is not None:
             sql += " LIMIT %s"
@@ -174,6 +208,30 @@ def get_stock_movements():
 
         # Gets all matching movements.
         movements = cursor.fetchall()
+
+        if include_summary:
+            cursor.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS transaction_count,
+                    COALESCE(SUM(
+                        CASE WHEN movement_type = 'STOCK_IN'
+                            THEN quantity ELSE 0 END
+                    ), 0) AS stock_in_quantity,
+                    COALESCE(SUM(
+                        CASE WHEN movement_type = 'STOCK_OUT'
+                            THEN quantity ELSE 0 END
+                    ), 0) AS stock_out_quantity
+                FROM ({filtered_sql}) AS filtered_movements
+                """,
+                filtered_params
+            )
+            summary = cursor.fetchone()
+
+            return jsonify({
+                "movements": movements,
+                "summary": summary,
+            }), 200
 
         return jsonify(movements), 200
 

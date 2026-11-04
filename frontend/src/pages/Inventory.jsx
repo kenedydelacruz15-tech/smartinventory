@@ -94,9 +94,6 @@ export default function Inventory() {
   const [movementSupplierId, setMovementSupplierId] = useState("");
   const [movementReference, setMovementReference] = useState("");
   const [movementRemarks, setMovementRemarks] = useState("");
-  const [movementHistory, setMovementHistory] = useState([]);
-  const [movementHistoryError, setMovementHistoryError] = useState("");
-  const [movementHistoryLoading, setMovementHistoryLoading] = useState(false);
 
   // Adjust stock modal
   const [editItem, setEditItem] = useState(null);
@@ -135,24 +132,6 @@ export default function Inventory() {
     }
   };
 
-  const loadMovementHistory = async () => {
-    try {
-      setMovementHistoryLoading(true);
-      setMovementHistoryError("");
-      const res = await api.get("/api/stock-movements/", {
-        params: { limit: 100 },
-      });
-      setMovementHistory(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error("Stock movement history error:", err);
-      setMovementHistoryError(
-        err.response?.data?.error || "Failed to load stock movement history."
-      );
-    } finally {
-      setMovementHistoryLoading(false);
-    }
-  };
-
   const loadSuppliers = async () => {
     try {
       const res = await api.get("/api/suppliers/");
@@ -165,7 +144,6 @@ export default function Inventory() {
   useEffect(() => {
     loadInventory();
     loadCategories();
-    loadMovementHistory();
     loadSuppliers();
   }, []);
 
@@ -292,7 +270,6 @@ export default function Inventory() {
 
       closeMovement();
       await loadInventory();
-      await loadMovementHistory();
     } catch (err) {
       console.error("Stock movement error:", err);
 
@@ -340,7 +317,6 @@ export default function Inventory() {
 
       closeEdit();
       await loadInventory();
-      await loadMovementHistory();
     } catch (err) {
       console.error("Stock adjustment error:", err);
 
@@ -770,85 +746,6 @@ export default function Inventory() {
           </div>
         </section>
       </div>
-
-      <section
-        className="dashboard-panel"
-        style={{ marginTop: 24, overflow: "hidden" }}
-      >
-        <div
-          className="dashboard-panel-title"
-          style={{ padding: "18px 20px", justifyContent: "space-between" }}
-        >
-          <div>
-            <i className="bi bi-arrow-left-right" />
-            <strong>Recent Stock Movement History</strong>
-          </div>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={loadMovementHistory}
-            disabled={movementHistoryLoading}
-          >
-            {movementHistoryLoading ? "Loading..." : "Refresh"}
-          </button>
-        </div>
-        <p style={{ margin: "0 20px 14px", color: "var(--muted, #64748b)", fontSize: 13 }}>
-          Sales, supplier returns, damaged items, branch transfers, and other stock changes are listed separately.
-        </p>
-        {movementHistoryError && (
-          <div className="error-message" style={{ margin: "0 20px 14px" }}>
-            {movementHistoryError}
-          </div>
-        )}
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Product</th>
-                <th>Movement</th>
-                <th>Reason / Destination</th>
-                <th>Quantity</th>
-                <th>Stock Before → After</th>
-                <th>Reference / Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movementHistoryLoading && movementHistory.length === 0 ? (
-                <tr><td colSpan="7" className="empty-state">Loading stock movement history...</td></tr>
-              ) : movementHistory.length === 0 ? (
-                <tr><td colSpan="7" className="empty-state">No stock movements recorded yet.</td></tr>
-              ) : (
-                movementHistory.map((movement) => {
-                  const isStockIn = movement.movement_type === "STOCK_IN";
-                  return (
-                    <tr key={movement.movement_id}>
-                      <td>{movement.created_at ? new Date(movement.created_at).toLocaleString() : "—"}</td>
-                      <td>
-                        <strong>{movement.product_name || "Unknown product"}</strong>
-                        <small style={{ display: "block", color: "var(--muted, #64748b)" }}>
-                          {movement.sku || movement.part_number || "—"}
-                        </small>
-                      </td>
-                      <td>
-                        <span className={`status-badge ${isStockIn ? "success" : "warning"}`}>
-                          {isStockIn ? "Stock In" : "Stock Out"}
-                        </span>
-                      </td>
-                      <td>{formatMovementReason(movement.reference_type || movement.movement_type)}</td>
-                      <td style={{ fontWeight: 700, color: isStockIn ? "var(--green-dark, #16804a)" : "var(--red, #b42318)" }}>
-                        {isStockIn ? "+" : "-"}{Number(movement.quantity || 0).toLocaleString()}
-                      </td>
-                      <td>{movement.previous_quantity} → {movement.new_quantity}</td>
-                      <td style={{ whiteSpace: "pre-wrap" }}>{movement.remarks || "—"}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       {/* ============================= */}
       {/* STOCK IN / STOCK OUT MODAL */}

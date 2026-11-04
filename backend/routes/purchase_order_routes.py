@@ -1,20 +1,37 @@
+from functools import wraps
+
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import get_jwt, jwt_required
 from backend.database import get_db_connection
 
 
 purchase_order_bp = Blueprint(
     "purchase_order_bp",
-    __name__
+    __name__,
+    url_prefix="/api"
 )
+
+
+def owner_store_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        claims = get_jwt()
+        if claims.get("role") != "OWNER":
+            return jsonify({"error": "Only store owners can manage purchase orders."}), 403
+        if not claims.get("store_id"):
+            return jsonify({"error": "Your account is not assigned to a store."}), 403
+        return view(*args, **kwargs)
+
+    return wrapped
 
 
 # Get all purchase orders for the logged-in store.
 @purchase_order_bp.route("/purchase-orders", methods=["GET"])
 @jwt_required()
+@owner_store_required
 def get_purchase_orders():
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)
@@ -91,9 +108,10 @@ def get_purchase_orders():
     methods=["GET"]
 )
 @jwt_required()
+@owner_store_required
 def get_purchase_order(purchase_order_id):
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)
@@ -240,9 +258,10 @@ def get_purchase_order(purchase_order_id):
     methods=["POST"]
 )
 @jwt_required()
+@owner_store_required
 def create_purchase_order():
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     data = request.get_json() or {}
 
@@ -452,9 +471,10 @@ def create_purchase_order():
     methods=["PUT"]
 )
 @jwt_required()
+@owner_store_required
 def update_purchase_order_status(purchase_order_id):
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     data = request.get_json() or {}
 
@@ -534,9 +554,10 @@ def update_purchase_order_status(purchase_order_id):
     methods=["PUT"]
 )
 @jwt_required()
+@owner_store_required
 def cancel_purchase_order(purchase_order_id):
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)
@@ -616,9 +637,10 @@ def cancel_purchase_order(purchase_order_id):
     methods=["POST"]
 )
 @jwt_required()
+@owner_store_required
 def receive_purchase_order(purchase_order_id):
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     data = request.get_json() or {}
 
@@ -1084,9 +1106,10 @@ def receive_purchase_order(purchase_order_id):
     methods=["GET"]
 )
 @jwt_required()
+@owner_store_required
 def get_purchase_order_receiving_history(purchase_order_id):
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)

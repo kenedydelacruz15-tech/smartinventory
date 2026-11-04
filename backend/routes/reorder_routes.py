@@ -1,17 +1,33 @@
+from functools import wraps
+
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import get_jwt, jwt_required
 from backend.database import get_db_connection
 
 
-reorder_bp = Blueprint("reorder_bp", __name__)
+reorder_bp = Blueprint("reorder_bp", __name__, url_prefix="/api")
+
+
+def store_user_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        claims = get_jwt()
+        if claims.get("role") not in {"OWNER", "STAFF"}:
+            return jsonify({"error": "Only store users can view reorder recommendations."}), 403
+        if not claims.get("store_id"):
+            return jsonify({"error": "Your account is not assigned to a store."}), 403
+        return view(*args, **kwargs)
+
+    return wrapped
 
 
 # Return products that need to be reordered for the logged-in store.
 @reorder_bp.route("/reorder-recommendations", methods=["GET"])
 @jwt_required()
+@store_user_required
 def get_reorder_recommendations():
 
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)

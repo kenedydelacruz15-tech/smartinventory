@@ -33,6 +33,34 @@ def get_dashboard_summary(store_id):
 
         total_stock = cursor.fetchone()["total_stock"]
 
+        cursor.execute(
+            """
+            SELECT
+                COALESCE(
+                    SUM(
+                        CASE WHEN sm.movement_type = 'STOCK_IN'
+                            THEN sm.quantity ELSE 0 END
+                    ),
+                    0
+                ) AS stock_in_7_days,
+                COALESCE(
+                    SUM(
+                        CASE WHEN sm.movement_type = 'STOCK_OUT'
+                            THEN sm.quantity ELSE 0 END
+                    ),
+                    0
+                ) AS stock_out_7_days
+            FROM stock_movements sm
+            JOIN products p
+                ON sm.product_id = p.product_id
+                AND sm.store_id = p.store_id
+            WHERE sm.store_id = %s
+              AND sm.movement_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            """,
+            (store_id,)
+        )
+        movement_totals = cursor.fetchone()
+
 
         # Low stock
         cursor.execute(
@@ -114,6 +142,8 @@ def get_dashboard_summary(store_id):
         return {
             "total_products": total_products,
             "total_stock": int(total_stock),
+            "stock_in_7_days": int(movement_totals["stock_in_7_days"]),
+            "stock_out_7_days": int(movement_totals["stock_out_7_days"]),
 
             "inventory": {
                 "low_stock": low_stock_count,

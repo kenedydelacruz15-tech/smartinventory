@@ -320,3 +320,551 @@
     justify-content: center;
   }
 }
+
+/* Match the inventory workspace's clean green-and-white visual language. */
+.motorparts-home {
+  --home-red: #0f9f75;
+  --home-ink: #173b32;
+  --home-muted: #60766d;
+}
+
+.motorparts-home .smart-home-header {
+  background: #fff;
+  color: #173b32;
+  border-bottom-color: #e1ece6;
+}
+
+.motorparts-home .smart-home-logo,
+.motorparts-home .smart-home-header nav a {
+  color: #173b32;
+}
+
+.motorparts-home .smart-home-logo small {
+  color: #708278;
+}
+
+.motorparts-home .smart-home-header nav a:hover {
+  color: #087c5b;
+}
+
+.motorparts-home .smart-home-header nav a:hover:after,
+.motorparts-home .smart-home-header nav a:first-child:after {
+  background: #0f9f75;
+}
+
+.motorparts-home .smart-home-login {
+  border-color: #0f9f75;
+  background: #0f9f75;
+  color: #fff;
+}
+
+.motorparts-home .smart-home-login:hover {
+  background: #087c5b;
+  border-color: #087c5b;
+}
+
+.motorparts-home .smart-home-hero {
+  min-height: 470px;
+  background: linear-gradient(115deg, #f3faf6 0%, #e8f5ee 55%, #f5faf7 100%);
+  color: #173b32;
+}
+
+.motorparts-home .smart-home-hero:before {
+  background: radial-gradient(ellipse at 82% 50%, #d7eee2 0%, transparent 58%);
+}
+
+.motorparts-home .smart-home-photo {
+  display: none;
+}
+
+.motorparts-home .smart-home-hero-inner {
+  min-height: 470px;
+}
+
+.motorparts-home .smart-home-eyebrow,
+.motorparts-home .smart-home-copy h1 span,
+.motorparts-home .smart-home-section-heading>span {
+  color: #087c5b;
+}
+
+.motorparts-home .smart-home-copy h1 {
+  color: #173b32;
+}
+
+.motorparts-home .smart-home-copy>p {
+  color: #60766d;
+}
+
+.motorparts-home .smart-home-secondary {
+  border-color: #d7e7de;
+  background: #fff;
+  color: #173b32;
+}
+
+.motorparts-home .smart-home-secondary:hover {
+  border-color: #0f9f75;
+  color: #087c5b;
+}
+
+.motorparts-home .smart-home-highlights span {
+  border-color: #d5e5dc;
+}
+
+.motorparts-home .smart-home-highlights i {
+  color: #0f9f75;
+}
+
+.motorparts-home .smart-home-highlights b {
+  color: #31564a;
+}
+
+.inventory-showcase {
+  padding: 18px;
+  border-color: #dbe9e1;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 22px 58px #173b3220;
+  color: #173b32;
+}
+
+.inventory-showcase .motorparts-showcase-heading {
+  padding-bottom: 13px;
+  border-bottom-color: #e5eee9;
+  color: #173b32;
+}
+
+.inventory-showcase .motorparts-showcase-heading span i {
+  color: #0f9f75;
+}
+
+.inventory-showcase .motorparts-showcase-heading small {
+  padding: 5px 8px;
+  border-radius: 20px;
+  background: #e9f7f0;
+  color: #087c5b;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.inventory-preview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.inventory-preview-metrics>div {
+  min-width: 0;
+  padding: 13px 12px;
+  border: 1px solid #e5eee9;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.inventory-preview-metrics>div>span,
+.inventory-preview-metrics>div>strong,
+.inventory-preview-metrics>div>small {
+  display: block;
+}
+
+.inventory-preview-metrics>div>span {
+  color: #71847b;
+  font-size: 9px;
+}
+
+.inventory-preview-metrics>div>strong {
+  margin-top: 7px;
+  color: #173b32;
+  font-size: 14px;
+}
+
+.inventory-preview-metrics>div>small {
+  margin-top: 8px;
+  color: #65796f;
+  font-size: 8px;
+}
+
+.inventory-preview-metrics>div>small i {
+  margin-right: 4px;
+  color: #0f9f75;
+}
+
+.inventory-preview-list {
+  margin-top: 12px;
+  padding: 13px;
+  border: 1px solid #e5eee9;
+  border-radius: 8px;
+}
+
+.inventory-preview-list-heading,
+.inventory-preview-list>div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inventory-preview-list-heading {
+  padding-bottom: 9px;
+  border-bottom: 1px solid #edf2ef;
+}
+
+.inventory-preview-list-heading strong {
+  color: #173b32;
+  font-size: 10px;
+}
+
+.inventory-preview-list-heading span {
+  color: #829188;
+  font-size: 8px;
+}
+
+.inventory-preview-list>div:not(:first-child) {
+  padding-top: 9px;
+  color: #52685e;
+  font-size: 9px;
+}
+
+.inventory-preview-list>div>i {
+  margin-right: 2px;
+  color: #0f9f75;
+}
+
+.inventory-preview-list>div:nth-child(3)>i {
+  color: #d99a00;
+}
+
+.inventory-preview-list>div:nth-child(4)>i {
+  color: #52789b;
+}
+
+.inventory-preview-list>div>span {
+  flex: 1;
+}
+
+.inventory-preview-list>div>b {
+  color: #31564a;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.inventory-preview-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 13px;
+  color: #71847b;
+  font-size: 8px;
+}
+
+.inventory-preview-footer span:first-child {
+  color: #31564a;
+  font-weight: 750;
+}
+
+.inventory-preview-footer i {
+  margin-right: 4px;
+  color: #0f9f75;
+}
+
+.motorparts-home .motorparts-benefits {
+  background: #f8faf9;
+}
+
+.motorparts-home .motorparts-benefits span {
+  color: #31564a;
+}
+
+.motorparts-home .motorparts-benefits i {
+  color: #0f9f75;
+}
+
+.motorparts-home .smart-home-feature {
+  border-color: #e1ece6;
+  background: linear-gradient(120deg, #fff, #f6faf8);
+}
+
+.motorparts-home .smart-home-feature>i {
+  background: #e9f7f0;
+  color: #0f9f75;
+}
+
+.motorparts-home .smart-home-feature h3,
+.motorparts-home .smart-home-section-heading h2 {
+  color: #173b32;
+}
+
+.motorparts-home .smart-home-feature p,
+.motorparts-home .smart-home-section-heading p {
+  color: #60766d;
+}
+
+.motorparts-home .motorparts-about {
+  background: #f5faf7;
+}
+
+.motorparts-home .motorparts-about .smart-home-step-grid article {
+  border-color: #e1ece6;
+  background: #fff;
+}
+
+.motorparts-home .motorparts-about .smart-home-step-grid article>i {
+  background: #e9f7f0;
+  color: #0f9f75;
+}
+
+.motorparts-home .motorparts-about .smart-home-step-grid h3 {
+  color: #173b32;
+}
+
+.motorparts-home .motorparts-about .smart-home-step-grid p {
+  color: #60766d;
+}
+
+.motorparts-home .inventory-home-cta {
+  border: 1px solid #d5e9dd;
+  background: linear-gradient(115deg, #e8f5ee, #f5faf7);
+}
+
+.motorparts-home .inventory-home-cta h2 {
+  color: #173b32;
+}
+
+.motorparts-home .inventory-home-cta p {
+  color: #60766d;
+}
+
+.motorparts-home .smart-home-footer {
+  background: #fff;
+  border-top: 1px solid #e1ece6;
+}
+
+.motorparts-home .smart-home-footer .smart-home-logo,
+.motorparts-home .smart-home-footer nav a,
+.motorparts-home .smart-home-footer>small {
+  color: #60766d;
+}
+
+@media (max-width: 820px) {
+  .motorparts-home .smart-home-hero,
+  .motorparts-home .smart-home-hero-inner {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 540px) {
+  .inventory-showcase {
+    padding: 13px;
+  }
+
+  .inventory-preview-metrics {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .inventory-preview-metrics>div {
+    padding: 10px;
+  }
+
+  .inventory-preview-metrics>div>strong {
+    display: inline-block;
+    margin: 4px 8px 0 0;
+    font-size: 12px;
+  }
+
+  .inventory-preview-metrics>div>small {
+    display: inline-block;
+    margin-top: 0;
+  }
+
+  .inventory-preview-list {
+    padding: 10px;
+  }
+
+  .inventory-preview-footer {
+    flex-direction: column;
+  }
+}
+
+/* Slightly larger supporting text keeps the page readable at normal zoom. */
+.motorparts-home .smart-home-header nav a {
+  font-size: 14px;
+}
+
+.motorparts-home .smart-home-login {
+  font-size: 13px;
+}
+
+.motorparts-home .smart-home-logo small {
+  font-size: 9px;
+}
+
+.motorparts-home .smart-home-eyebrow,
+.motorparts-home .smart-home-section-heading>span {
+  font-size: 12px;
+}
+
+.motorparts-home .smart-home-copy>p {
+  font-size: clamp(14px, 1.15vw, 17px);
+}
+
+.motorparts-home .smart-home-secondary {
+  font-size: 14px;
+}
+
+.motorparts-home .smart-home-highlights b {
+  font-size: 12px;
+}
+
+.motorparts-home .smart-home-highlights i {
+  font-size: 20px;
+}
+
+.inventory-showcase .motorparts-showcase-heading {
+  font-size: 12px;
+}
+
+.inventory-showcase .motorparts-showcase-heading small {
+  font-size: 10px;
+}
+
+.inventory-preview-metrics>div>span {
+  font-size: 10px;
+}
+
+.inventory-preview-metrics>div>strong {
+  font-size: 15px;
+}
+
+.inventory-preview-metrics>div>small {
+  font-size: 9px;
+}
+
+.inventory-preview-list-heading strong {
+  font-size: 11px;
+}
+
+.inventory-preview-list-heading span {
+  font-size: 9px;
+}
+
+.inventory-preview-list>div:not(:first-child) {
+  font-size: 10px;
+}
+
+.inventory-preview-list>div>b {
+  font-size: 9px;
+}
+
+.inventory-preview-footer {
+  font-size: 9px;
+}
+
+.motorparts-home .motorparts-benefits>p {
+  font-size: 13px;
+}
+
+.motorparts-home .motorparts-benefits span {
+  font-size: 13px;
+}
+
+.motorparts-home .smart-home-section-heading h2 {
+  font-size: clamp(25px, 2.2vw, 32px);
+}
+
+.motorparts-home .smart-home-section-heading p {
+  font-size: 14px;
+}
+
+.motorparts-home .smart-home-feature h3 {
+  font-size: 14px;
+}
+
+.motorparts-home .smart-home-feature p {
+  font-size: 12px;
+}
+
+.motorparts-home .motorparts-about .smart-home-step-grid h3 {
+  font-size: 14px;
+}
+
+.motorparts-home .motorparts-about .smart-home-step-grid p {
+  font-size: 12px;
+}
+
+.motorparts-home .inventory-home-cta>div>span {
+  font-size: 11px;
+}
+
+.motorparts-home .inventory-home-cta h2 {
+  font-size: 23px;
+}
+
+.motorparts-home .inventory-home-cta p {
+  font-size: 13px;
+}
+
+@media (max-width: 540px) {
+  .motorparts-home .smart-home-header nav a {
+    font-size: 12px;
+  }
+
+  .motorparts-home .smart-home-login {
+    font-size: 12px;
+  }
+
+  .motorparts-home .smart-home-logo small {
+    font-size: 7px;
+  }
+
+  .motorparts-home .smart-home-eyebrow,
+  .motorparts-home .smart-home-section-heading>span {
+    font-size: 10px;
+  }
+
+  .motorparts-home .smart-home-copy>p {
+    font-size: 14px;
+  }
+
+  .motorparts-home .smart-home-secondary {
+    font-size: 12px;
+  }
+
+  .motorparts-home .smart-home-highlights b {
+    font-size: 10px;
+  }
+
+  .inventory-preview-metrics>div>span {
+    font-size: 10px;
+  }
+
+  .inventory-preview-metrics>div>strong {
+    font-size: 13px;
+  }
+
+  .inventory-preview-metrics>div>small {
+    font-size: 9px;
+  }
+
+  .motorparts-home .motorparts-benefits span {
+    font-size: 10px;
+  }
+
+  .motorparts-home .smart-home-section-heading h2 {
+    font-size: 25px;
+  }
+
+  .motorparts-home .smart-home-section-heading p {
+    font-size: 12px;
+  }
+
+  .motorparts-home .smart-home-feature h3,
+  .motorparts-home .motorparts-about .smart-home-step-grid h3 {
+    font-size: 13px;
+  }
+
+  .motorparts-home .smart-home-feature p,
+  .motorparts-home .motorparts-about .smart-home-step-grid p {
+    font-size: 11px;
+  }
+}

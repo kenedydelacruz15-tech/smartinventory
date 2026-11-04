@@ -8,40 +8,79 @@ React + Vite frontend -> Axios -> Python Flask API -> MariaDB/MySQL
 
 The frontend does not connect directly to the database. Existing backend routes and the existing `smart_inventory` database remain the source of truth.
 
-## Project layout
+## Find files quickly
 
 ```text
-backend/
-  app.py               # Flask app and API configuration
-  database.py          # MySQL connection pool
-  audit_logger.py      # Shared audit logging helper
-  routes/              # Flask API endpoints
-  services/            # Business logic used by routes
-  scripts/             # Database/admin helper commands
+app.py                  # Simple project-root launcher; imports backend.app
+backend/                # Active Flask backend package
+  app.py                # Flask app setup and API route registration
+  database.py           # MySQL connection pool
+  audit_logger.py       # Shared audit-log helper
+  routes/               # Active Flask API endpoints
+  services/             # Shared backend business logic
+  scripts/              # Admin and database helper commands
 frontend/
   src/
-    pages/             # Screen components and their page-specific CSS
-    components/        # Reusable UI components
-    services/          # API client and authentication helpers
-    styles.css         # App-wide styles
+    App.jsx             # Frontend routes, navigation, and app layout
+    pages/              # Screen components and page-specific styles
+    components/         # Shared UI components
+    services/           # API client and authentication helpers
+    styles.css          # App-wide styles
 ```
 
-## Frontend
+### Which backend files should I edit?
 
-Location: `frontend/`
+The normal start command is `python app.py`. That file imports `backend.app`,
+so **`backend/` is the active backend**.
 
-```text
-frontend/src/
-  App.jsx
-  main.jsx
-  styles.css
-  pages/
-  services/
-    api.js        # Axios client + JWT interceptor
-    auth.js
-```
+The repository also contains older top-level copies such as `routes/`,
+`services/`, `database.py`, and `audit_logger.py`. They are not imported by the
+normal launcher. Keep them untouched unless you are intentionally working on
+the legacy version; for current backend changes, use the matching file under
+`backend/`.
 
-Axios automatically attaches the JWT from `localStorage` to API requests.
+### Common feature edit locations
+
+| To change... | Edit here |
+|---|---|
+| Flask startup, configuration, or registered endpoints | `backend/app.py` |
+| Database connection behavior | `backend/database.py` |
+| Audit event creation or audit table setup | `backend/audit_logger.py` |
+| Login, users, and roles API | `backend/routes/user_routes.py` |
+| Product API | `backend/routes/product_routes.py` |
+| Inventory and stock adjustments API | `backend/routes/inventory_routes.py`, `backend/routes/stock_in_routes.py`, `backend/routes/stock_out_routes.py` |
+| Stock activity history API | `backend/routes/stock_movement_routes.py` |
+| Dashboard API and summary calculations | `backend/routes/dashboard_routes.py`, `backend/services/dashboard_service.py` |
+| Alerts and mobile notifications API | `backend/routes/alert_routes.py`, `backend/services/alert_service.py` |
+| Reorder recommendations | `backend/routes/reorder_routes.py`, `backend/services/reorder_service.py` |
+| Reports API | `backend/routes/report_routes.py` |
+| Store, supplier, or category API | Matching file in `backend/routes/` |
+| Admin/database helper commands | `backend/scripts/` |
+| Frontend screen URL, sidebar, or protected routes | `frontend/src/App.jsx` |
+| Inventory page content and behavior | `frontend/src/pages/Inventory.jsx` |
+| Owner or staff dashboard content | `frontend/src/pages/OwnerDashboard.jsx`, `frontend/src/pages/StaffDashboard.jsx` |
+| Landing page wording and sections | `frontend/src/pages/LandingPage.jsx` |
+| Landing page appearance and text sizing | `frontend/src/pages/MotorpartsLanding.css` |
+| Reports page content and behavior | `frontend/src/pages/Reports.jsx` |
+| Audit log screen | `frontend/src/pages/AuditLogs.jsx` |
+| Reusable notification bell or stock activity panel | Matching file in `frontend/src/components/` |
+| API base URL or Axios behavior | `frontend/src/services/api.js` |
+| Login state and token helpers | `frontend/src/services/auth.js` |
+| General application styling | `frontend/src/styles.css` |
+
+The landing page imports several style files. For its current motorparts
+inventory theme and text sizing, start with `frontend/src/pages/MotorpartsLanding.css`.
+The shared landing layout and responsive styles are in `DarkLandingPage.css`,
+`LandingTypography.css`, and `LandingFeaturesScale.css`.
+
+### Store operations screens and mobile API
+
+- Owners and staff can review stock-in/out analytics and movement history from their dashboards, with date, type, and reason filters.
+- Owners and staff can view live stock/expiry and reorder notifications from the notification bell.
+- Mobile clients can poll `GET /api/notifications` with the same JWT bearer token for a JSON response containing `count`, `generated_at`, and `notifications`. Notifications are derived from current stock conditions; read/unread state and push delivery are not persisted.
+- Dashboard movement analytics use `GET /api/stock-movements/` with optional `start_date`, `end_date`, `movement_type`, and `reference_type` filters. Add `include_summary=true` for filtered stock-in/out totals and transaction count.
+- Purchase-order API routes and stored records are retained in the backend but are not exposed in the frontend.
+- These screens use the existing Flask endpoints; no database schema or migration changes are required.
 
 ## Backend
 
@@ -90,15 +129,6 @@ http://localhost:5173/
 Copy `.env.example` to `.env` in the project root and fill in your existing database credentials and private secrets.
 
 Do not commit `.env` to Git.
-
-### Common edit locations
-
-- Database connection: `backend/database.py` and the `DB_*` values in `.env`.
-- Backend routes and API registration: `backend/routes/` and `backend/app.py`.
-- Shared backend logic: `backend/services/`.
-- Frontend API address: `frontend/src/services/api.js` (`VITE_API_URL`).
-- Page content and page-specific appearance: `frontend/src/pages/`.
-- App-wide appearance: `frontend/src/styles.css`.
 
 Example:
 

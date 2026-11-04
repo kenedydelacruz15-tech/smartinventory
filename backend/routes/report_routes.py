@@ -1,18 +1,35 @@
+from functools import wraps
+
 from flask import Blueprint, jsonify
 from backend.database import get_db_connection
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import get_jwt, jwt_required
 
-report_bp = Blueprint("report_bp", __name__)
+report_bp = Blueprint("report_bp", __name__, url_prefix="/api")
+
+
+def owner_store_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        claims = get_jwt()
+        if claims.get("role") != "OWNER":
+            return jsonify({"error": "Only store owners can view reports."}), 403
+        if not claims.get("store_id"):
+            return jsonify({"error": "Your account is not assigned to a store."}), 403
+        return view(*args, **kwargs)
+
+    return wrapped
+
 
 # CURRENT INVENTORY REPORT
 
 @report_bp.route("/reports/current-inventory", methods=["GET"])
 @jwt_required()
+@owner_store_required
 def current_inventory_report():
     """
     Generates a current inventory valuation report for the active store owner.
     """
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)
@@ -22,23 +39,25 @@ def current_inventory_report():
             products.product_id,
             products.product_name,
             categories.category_name,
-            products.price,
-            inventory.stock_quantity,
-            (products.price * inventory.stock_quantity) AS total_value
+            products.selling_price AS price,
+            COALESCE(inventory.stock_quantity, 0) AS stock_quantity,
+            (products.selling_price * COALESCE(inventory.stock_quantity, 0)) AS total_value
         FROM products
         LEFT JOIN categories
             ON products.category_id = categories.category_id
+            AND categories.store_id = products.store_id
         LEFT JOIN inventory
             ON products.product_id = inventory.product_id
         WHERE products.store_id = %s
         ORDER BY products.product_name
     """
 
-    cursor.execute(sql, (current_store_id,))
-    inventory = cursor.fetchall()
-
-    cursor.close()
-    db.close()
+    try:
+        cursor.execute(sql, (current_store_id,))
+        inventory = cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
 
     return jsonify(inventory)
 
@@ -46,11 +65,12 @@ def current_inventory_report():
 
 @report_bp.route("/reports/stock-movements", methods=["GET"])
 @jwt_required()
+@owner_store_required
 def stock_movement_report():
     """
     Generates an inventory ledger audit trail report for the active store owner.
     """
-    current_store_id = get_jwt_identity()
+    current_store_id = get_jwt().get("store_id")
 
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)
@@ -72,10 +92,11 @@ def stock_movement_report():
                  stock_movements.movement_id DESC
     """
 
-    cursor.execute(sql, (current_store_id,))
-    movements = cursor.fetchall()
-
-    cursor.close()
-    db.close()
+    try:
+        cursor.execute(sql, (current_store_id,))
+        movements = cursor.fetchall()
+    finally:
+        cursor.close()
+        db.close()
 
     return jsonify(movements)

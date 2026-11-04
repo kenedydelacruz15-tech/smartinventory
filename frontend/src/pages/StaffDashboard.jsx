@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../services/api";
+import StockActivityAnalytics from "../components/StockActivityAnalytics";
 
 export default function StaffDashboard() {
   const [summary, setSummary] = useState(null);
   const [inventoryStatus, setInventoryStatus] = useState([]);
-  const [movements, setMovements] = useState([]);
   const [categoryStock, setCategoryStock] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -18,15 +18,13 @@ export default function StaffDashboard() {
     try {
       setLoading(true);
       setError("");
-      const [summaryRes, statusRes, movementRes, categoryRes] = await Promise.all([
+      const [summaryRes, statusRes, categoryRes] = await Promise.all([
         api.get("/api/dashboard/summary"),
         api.get("/api/dashboard/charts/inventory-status"),
-        api.get("/api/dashboard/charts/stock-movements?days=7"),
         api.get("/api/dashboard/charts/category-stock")
       ]);
       setSummary(summaryRes.data || {});
       setInventoryStatus(statusRes.data?.data || []);
-      setMovements(movementRes.data?.data || []);
       setCategoryStock(categoryRes.data?.data || []);
     } catch (err) {
       console.error("Could not load staff dashboard:", err);
@@ -38,10 +36,6 @@ export default function StaffDashboard() {
 
   const statusCount = (status) => Number(
     inventoryStatus.find((item) => item.stock_status === status)?.product_count || 0
-  );
-
-  const movementCount = (type) => Number(
-    movements.find((item) => item.movement_type === type)?.total_quantity || 0
   );
 
   const categoryTotal = useMemo(
@@ -73,9 +67,8 @@ export default function StaffDashboard() {
         <div className="dashboard-kpi blue"><span><i className="bi bi-stack" /> Inventory</span><strong>{loading ? "..." : summary?.total_stock ?? 0}</strong><small>Total units in stock</small></div>
         <div className="dashboard-kpi orange"><span><i className="bi bi-exclamation-circle" /> Low Stock</span><strong>{loading ? "..." : summary?.inventory?.low_stock ?? 0}</strong><small>Needs attention</small></div>
         <div className="dashboard-kpi red"><span><i className="bi bi-x-octagon" /> Out of Stock</span><strong>{loading ? "..." : summary?.inventory?.out_of_stock ?? 0}</strong><small>Zero stock products</small></div>
-        <div className="dashboard-kpi purple"><span><i className="bi bi-bell" /> Alerts</span><strong>{loading ? "..." : summary?.unread_alerts ?? 0}</strong><small>Items needing action</small></div>
-        <div className="dashboard-kpi cyan"><span><i className="bi bi-box-arrow-in-down" /> Stock In</span><strong>{loading ? "..." : movementCount("STOCK_IN")}</strong><small>Units · last 7 days</small></div>
-        <div className="dashboard-kpi teal"><span><i className="bi bi-box-arrow-up" /> Stock Out</span><strong>{loading ? "..." : movementCount("STOCK_OUT")}</strong><small>Units · last 7 days</small></div>
+        <div className="dashboard-kpi cyan"><span><i className="bi bi-box-arrow-in-down" /> Stock In</span><strong>{loading ? "..." : summary?.stock_in_7_days ?? 0}</strong><small>Units · last 7 days</small></div>
+        <div className="dashboard-kpi teal"><span><i className="bi bi-box-arrow-up" /> Stock Out</span><strong>{loading ? "..." : summary?.stock_out_7_days ?? 0}</strong><small>Units · last 7 days</small></div>
         <div className="dashboard-kpi dark"><span><i className="bi bi-grid" /> Categories</span><strong>{loading ? "..." : categoryStock.length}</strong><small>{categoryTotal.toLocaleString()} units grouped</small></div>
       </div>
 
@@ -86,15 +79,6 @@ export default function StaffDashboard() {
 
       <div className="dashboard-main-grid">
         <div className="dashboard-panel">
-          <div className="dashboard-panel-title"><div><i className="bi bi-bar-chart-fill" /><strong>Stock Movement</strong></div><span>Last 7 days</span></div>
-          <div className="movement-visual">
-            <div className="movement-column"><div className="movement-bar in" style={{ height: `${Math.max(14, movementCount("STOCK_IN") / Math.max(movementCount("STOCK_IN"), movementCount("STOCK_OUT"), 1) * 100)}%` }} /><strong>{movementCount("STOCK_IN").toLocaleString()}</strong><small>Stock In</small></div>
-            <div className="movement-column"><div className="movement-bar out" style={{ height: `${Math.max(14, movementCount("STOCK_OUT") / Math.max(movementCount("STOCK_IN"), movementCount("STOCK_OUT"), 1) * 100)}%` }} /><strong>{movementCount("STOCK_OUT").toLocaleString()}</strong><small>Stock Out</small></div>
-            <div className="movement-summary"><span>Net movement</span><strong>{(movementCount("STOCK_IN") - movementCount("STOCK_OUT")).toLocaleString()} units</strong><small>Recorded inventory movements</small></div>
-          </div>
-        </div>
-
-        <div className="dashboard-panel">
           <div className="dashboard-panel-title"><div><i className="bi bi-pie-chart-fill" /><strong>Inventory Status</strong></div><span>Product health</span></div>
           <div className="status-dashboard-grid">
             <div className="status-dashboard-item good"><span>In Stock</span><strong>{loading ? "..." : statusCount("IN_STOCK")}</strong></div>
@@ -103,6 +87,8 @@ export default function StaffDashboard() {
           </div>
         </div>
       </div>
+
+      <StockActivityAnalytics />
 
       <div className="dashboard-two-column">
         <div className="dashboard-panel dashboard-table-panel">
