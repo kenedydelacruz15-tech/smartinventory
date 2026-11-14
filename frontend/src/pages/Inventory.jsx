@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Html5Qrcode } from "html5-qrcode";
 import api from "../services/api";
 
 const STOCK_IN_REASONS = [
@@ -94,6 +95,11 @@ export default function Inventory() {
   const [movementSupplierId, setMovementSupplierId] = useState("");
   const [movementReference, setMovementReference] = useState("");
   const [movementRemarks, setMovementRemarks] = useState("");
+  const qrScannerRef = useRef(null);
+  const qrScannerOpenRef = useRef(false);
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [qrScannerError, setQrScannerError] = useState("");
+  const [qrMovementType, setQrMovementType] = useState("STOCK_IN");
 
   // Adjust stock modal
   const [editItem, setEditItem] = useState(null);
@@ -145,6 +151,15 @@ export default function Inventory() {
     loadInventory();
     loadCategories();
     loadSuppliers();
+  }, []);
+
+  useEffect(() => () => {
+    const scanner = qrScannerRef.current;
+    if (scanner) {
+      scanner.stop()
+        .catch((err) => console.warn("Inventory QR scanner stopped during cleanup:", err))
+        .finally(() => scanner.clear().catch((err) => console.warn("Inventory QR scanner cleanup failed:", err)));
+    }
   }, []);
 
   // Load active categories for the inventory category browser.
@@ -221,6 +236,67 @@ export default function Inventory() {
     setMovementSupplierId("");
     setMovementReference("");
     setMovementRemarks("");
+  };
+
+  const stopQrScanner = async () => {
+    qrScannerOpenRef.current = false;
+    const scanner = qrScannerRef.current;
+    qrScannerRef.current = null;
+    if (scanner) {
+      try {
+        await scanner.stop();
+      } catch (err) {
+        console.error("Could not stop inventory QR scanner:", err);
+      }
+      try {
+        await scanner.clear();
+      } catch (err) {
+        console.error("Could not clear inventory QR scanner:", err);
+      }
+    }
+    setQrScannerOpen(false);
+  };
+
+  const startQrScanner = (type) => {
+    setQrMovementType(type);
+    setQrScannerError("");
+    qrScannerOpenRef.current = true;
+    setQrScannerOpen(true);
+    window.setTimeout(async () => {
+      try {
+        const scanner = new Html5Qrcode("inventory-qr-reader");
+        qrScannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 230, height: 230 } },
+          async (decodedText) => {
+            const value = decodedText.trim();
+            const productId = value.match(/^SMARTINVENTORY:PRODUCT:(\d+)$/i)?.[1]
+              || value.match(/^\d+$/)?.[0];
+            if (!productId) {
+              setQrScannerError("This QR code is not a SmartInventory product label.");
+              return;
+            }
+            const item = items.find((entry) => Number(entry.product_id) === Number(productId));
+            if (!item) {
+              setQrScannerError("No inventory record matches this product QR code.");
+              return;
+            }
+            await stopQrScanner();
+            openMovement(item, type);
+          },
+          () => {}
+        );
+        if (!qrScannerOpenRef.current) {
+          await scanner.stop();
+          await scanner.clear();
+          if (qrScannerRef.current === scanner) qrScannerRef.current = null;
+        }
+      } catch (err) {
+        console.error("Inventory QR scanner error:", err);
+        setQrScannerError("Could not start the camera. Allow camera access and try again.");
+      }
+    }, 0);
   };
 
   // Submit Stock In / Stock Out
@@ -477,6 +553,14 @@ export default function Inventory() {
         <div>
           <h1>Inventory</h1>
           <p>Manage stock levels and inventory movements.</p>
+        </div>
+        <div className="inventory-quick-actions">
+          <button type="button" className="btn-success" onClick={() => startQrScanner("STOCK_IN")}>
+            <i className="bi bi-qr-code-scan" /> QR Stock In
+          </button>
+          <button type="button" className="btn-warning" onClick={() => startQrScanner("STOCK_OUT")}>
+            <i className="bi bi-qr-code-scan" /> QR Stock Out
+          </button>
         </div>
       </div>
 
@@ -986,6 +1070,23 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      {qrScannerOpen && (
+        <div className="inventory-modal-overlay" onClick={stopQrScanner}>
+          <div className="inventory-modal qr-scanner-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-qr-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h2 id="inventory-qr-title">{qrMovementType === "STOCK_IN" ? "Scan for Stock In" : "Scan for Stock Out"}</h2>
+                <p className="modal-help">Scan a product QR label to open its stock movement form.</p>
+              </div>
+              <button type="button" className="secondary" onClick={stopQrScanner}>Close</button>
+            </div>
+            <div id="inventory-qr-reader" />
+            {qrScannerError && <div className="alert alert-error" role="alert">{qrScannerError}</div>}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

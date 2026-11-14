@@ -84,7 +84,9 @@ def get_admin_audit_logs():
         return jsonify({"error": "limit must be a valid number."}), 400
 
     category = (request.args.get("category") or "ALL").strip().upper()
-    allowed = {"ALL", "STORE_CREATED", "USER_CREATED"}
+    allowed = {
+        "ALL", "STORE_CREATED", "USER_CREATED", "USER_LOGIN", "USER_LOGOUT"
+    }
     if category not in allowed:
         return jsonify({"error": "Invalid event category."}), 400
 

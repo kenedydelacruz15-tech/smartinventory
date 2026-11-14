@@ -138,6 +138,58 @@ def get_suppliers():
             connection.close()
 
 
+@supplier_bp.route("/stock-in-history", methods=["GET"])
+@jwt_required()
+def get_stock_in_history():
+    access, error_response, status_code = get_store_access()
+    if error_response:
+        return error_response, status_code
+
+    _, store_id = access
+    connection = cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT
+                sm.movement_id,
+                sm.movement_date,
+                si.stock_in_id,
+                si.supplier_id,
+                COALESCE(s.supplier_name, 'No supplier recorded') AS supplier_name,
+                p.product_id,
+                p.product_name,
+                p.sku,
+                si.quantity,
+                sm.previous_quantity,
+                sm.new_quantity,
+                sm.reference_type,
+                sm.remarks
+            FROM stock_in si
+            INNER JOIN stock_movements sm
+                ON sm.reference_id = si.stock_in_id
+                AND sm.store_id = si.store_id
+                AND sm.movement_type = 'STOCK_IN'
+            INNER JOIN products p
+                ON p.product_id = si.product_id
+                AND p.store_id = si.store_id
+            LEFT JOIN suppliers s
+                ON s.supplier_id = si.supplier_id
+                AND s.store_id = si.store_id
+            WHERE si.store_id = %s
+            ORDER BY sm.movement_date DESC, sm.movement_id DESC
+            LIMIT 500
+        """, (store_id,))
+        return jsonify({"stock_ins": cursor.fetchall()}), 200
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 # Gets one active supplier from the logged-in user's store.
 @supplier_bp.route("/<int:supplier_id>", methods=["GET"])
 @jwt_required()

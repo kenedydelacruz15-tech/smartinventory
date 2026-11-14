@@ -3,9 +3,12 @@ import { Link } from "react-router-dom";
 import api from "../services/api";
 import BackButton from "../components/BackButton";
 
+const number = (value) => Number(value || 0).toLocaleString();
+
 export default function Analytics() {
   const [summary, setSummary] = useState(null);
   const [movements, setMovements] = useState([]);
+  const [dailyMovements, setDailyMovements] = useState([]);
   const [status, setStatus] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,10 +22,11 @@ export default function Analytics() {
         api.get("/api/dashboard/summary"),
         api.get("/api/dashboard/charts/stock-movements?days=7"),
         api.get("/api/dashboard/charts/inventory-status"),
-        api.get("/api/dashboard/charts/category-stock")
+        api.get("/api/dashboard/charts/category-stock"),
       ]);
       setSummary(summaryRes.data || {});
       setMovements(movementRes.data?.data || []);
+      setDailyMovements(movementRes.data?.daily_data || []);
       setStatus(statusRes.data?.data || []);
       setCategories(categoryRes.data?.data || []);
     } catch (err) {
@@ -42,144 +46,148 @@ export default function Analytics() {
   const lowStock = Number(status.find((item) => item.stock_status === "LOW_STOCK")?.product_count || 0);
   const outOfStock = Number(status.find((item) => item.stock_status === "OUT_OF_STOCK")?.product_count || 0);
   const totalProducts = Number(summary?.total_products || 0);
-  const healthTotal = Math.max(inStock + lowStock + outOfStock, 1);
-  const healthPercent = {
-    in: (inStock / healthTotal) * 100,
-    low: (lowStock / healthTotal) * 100,
-    out: (outOfStock / healthTotal) * 100
-  };
-  const topCategories = [...categories]
-    .sort((a, b) => Number(b.total_stock || 0) - Number(a.total_stock || 0))
-    .slice(0, 8);
-  const maxCategory = Math.max(...topCategories.map((item) => Number(item.total_stock || 0)), 1);
+  const totalHealth = Math.max(inStock + lowStock + outOfStock, 1);
   const totalCategoryStock = useMemo(
     () => categories.reduce((sum, item) => sum + Number(item.total_stock || 0), 0),
     [categories]
   );
-  const movementMax = Math.max(stockIn, stockOut, 1);
+  const topCategories = [...categories]
+    .sort((a, b) => Number(b.total_stock || 0) - Number(a.total_stock || 0))
+    .slice(0, 8);
+  const maxCategoryStock = Math.max(...topCategories.map((item) => Number(item.total_stock || 0)), 1);
+  const dailyTrend = useMemo(() => {
+    const dateParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date()).reduce((parts, part) => {
+      if (part.type !== "literal") parts[part.type] = part.value;
+      return parts;
+    }, {});
+    const today = Date.UTC(Number(dateParts.year), Number(dateParts.month) - 1, Number(dateParts.day));
+    const byDate = new Map(dailyMovements.map((item) => [item.movement_date, item]));
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(today - (6 - index) * 86400000).toISOString().slice(0, 10);
+      const movement = byDate.get(date) || {};
+      return {
+        date,
+        label: new Intl.DateTimeFormat("en-PH", { weekday: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)),
+        stockIn: Number(movement.stock_in || 0),
+        stockOut: Number(movement.stock_out || 0),
+      };
+    });
+  }, [dailyMovements]);
+  const dailyMax = Math.max(1, ...dailyTrend.flatMap((day) => [day.stockIn, day.stockOut]));
 
   return (
-    <div className="inventory-dashboard analytics-page">
+    <div className="shadcn-analytics">
       <BackButton fallback="/owner/dashboard" label="Back to Owner Dashboard" />
-
-      <div className="dashboard-top-row">
+      <header className="shadcn-analytics-header">
         <div>
-          <div className="dashboard-breadcrumb">STORE / ANALYTICS</div>
-          <h1>Inventory Analytics</h1>
-          <p>See stock movement, inventory health, and category levels at a glance.</p>
+          <div className="shadcn-breadcrumb">Workspace / Analytics</div>
+          <h1>Analytics</h1>
+          <p>Inventory health and stock movement for your store.</p>
         </div>
-        <button className="dashboard-refresh" onClick={loadAnalytics} disabled={loading}>
-          <i className="bi bi-arrow-clockwise" /> {loading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
-
-      {error && <div className="dashboard-error"><i className="bi bi-exclamation-circle" /> {error}</div>}
-
-      <div className="dashboard-kpi-grid analytics-kpis">
-        <div className="dashboard-kpi green"><span><i className="bi bi-box-seam" /> Products</span><strong>{loading ? "..." : totalProducts}</strong><small>Active products</small></div>
-        <div className="dashboard-kpi blue"><span><i className="bi bi-stack" /> Inventory</span><strong>{loading ? "..." : Number(summary?.total_stock || 0).toLocaleString()}</strong><small>Total units in stock</small></div>
-        <div className="dashboard-kpi orange"><span><i className="bi bi-exclamation-circle" /> Low Stock</span><strong>{loading ? "..." : lowStock}</strong><small>Needs replenishment</small></div>
-        <div className="dashboard-kpi red"><span><i className="bi bi-x-octagon" /> Out of Stock</span><strong>{loading ? "..." : outOfStock}</strong><small>Zero stock products</small></div>
-        <div className="dashboard-kpi cyan"><span><i className="bi bi-box-arrow-in-down" /> Stock In</span><strong>{loading ? "..." : stockIn.toLocaleString()}</strong><small>Last 7 days</small></div>
-        <div className="dashboard-kpi teal"><span><i className="bi bi-box-arrow-up" /> Stock Out</span><strong>{loading ? "..." : stockOut.toLocaleString()}</strong><small>Last 7 days</small></div>
-      </div>
-
-      <div className="dashboard-panel-heading">
-        <div><h2>Inventory Performance</h2><span>Useful visual summaries from your current inventory records.</span></div>
-        <Link to="/inventory">Open Inventory <i className="bi bi-arrow-right" /></Link>
-      </div>
-
-      <div className="analytics-visual-grid">
-        <div className="dashboard-panel analytics-chart-panel">
-          <div className="dashboard-panel-title">
-            <div><i className="bi bi-bar-chart-fill" /><strong>Stock Movement</strong></div>
-            <span>Last 7 days</span>
-          </div>
-          <div className="analytics-column-chart">
-            <div className="analytics-y-line"><span>Units</span></div>
-            <div className="analytics-columns">
-              <div className="analytics-column-item">
-                <strong>{stockIn.toLocaleString()}</strong>
-                <div className="analytics-column in" style={{ height: `${Math.max(28, (stockIn / movementMax) * 175)}px` }} />
-                <span><i className="legend-dot green-dot" /> Stock In</span>
-              </div>
-              <div className="analytics-column-item">
-                <strong>{stockOut.toLocaleString()}</strong>
-                <div className="analytics-column out" style={{ height: `${Math.max(28, (stockOut / movementMax) * 175)}px` }} />
-                <span><i className="legend-dot red-dot" /> Stock Out</span>
-              </div>
-              <div className={`analytics-net-card ${net >= 0 ? "positive" : "negative"}`}>
-                <small>Net movement</small>
-                <strong>{net >= 0 ? "+" : ""}{net.toLocaleString()}</strong>
-                <span>units</span>
-              </div>
-            </div>
-          </div>
+        <div className="shadcn-header-actions">
+          <span className="shadcn-date-chip"><i className="bi bi-calendar3" /> Last 7 days</span>
+          <button type="button" className="shadcn-button shadcn-button-outline" onClick={loadAnalytics} disabled={loading}>
+            <i className={`bi ${loading ? "bi-arrow-repeat" : "bi-arrow-clockwise"}`} /> {loading ? "Refreshing" : "Refresh"}
+          </button>
         </div>
+      </header>
 
-        <div className="dashboard-panel analytics-chart-panel">
-          <div className="dashboard-panel-title">
-            <div><i className="bi bi-pie-chart-fill" /><strong>Inventory Health</strong></div>
-            <span>{totalProducts} products</span>
-          </div>
-          <div className="analytics-health-chart">
-            <div
-              className="analytics-donut"
-              style={{
-                background: `conic-gradient(#0aaa68 0 ${healthPercent.in}%, #f39a05 ${healthPercent.in}% ${healthPercent.in + healthPercent.low}%, #e7463d ${healthPercent.in + healthPercent.low}% 100%)`
-              }}
-            >
-              <div><strong>{totalProducts}</strong><span>Products</span></div>
-            </div>
-            <div className="analytics-health-legend">
-              <div><span><i className="legend-dot green-dot" /> In Stock</span><strong>{inStock}</strong></div>
-              <div><span><i className="legend-dot orange-dot" /> Low Stock</span><strong>{lowStock}</strong></div>
-              <div><span><i className="legend-dot red-dot" /> Out of Stock</span><strong>{outOfStock}</strong></div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {error && <div className="shadcn-alert" role="alert"><i className="bi bi-exclamation-circle" /> {error}</div>}
 
-      <div className="dashboard-panel analytics-category-panel">
-        <div className="dashboard-panel-title">
-          <div><i className="bi bi-grid-fill" /><strong>Stock by Category</strong></div>
-          <span>{totalCategoryStock.toLocaleString()} total units</span>
-        </div>
-        {topCategories.length === 0 ? (
-          <div className="dashboard-empty">No category data available.</div>
-        ) : (
-          <div className="analytics-category-chart">
-            {topCategories.map((item, index) => {
-              const units = Number(item.total_stock || 0);
-              const pct = Math.round((units / maxCategory) * 100);
-              return (
-                <div className="analytics-category-row" key={`${item.category_name}-${index}`}>
-                  <div className="analytics-category-name"><strong>{item.category_name}</strong><span>{units.toLocaleString()} units</span></div>
-                  <div className="analytics-category-track"><span style={{ width: `${pct}%` }} /></div>
+      <section className="shadcn-metric-grid" aria-label="Inventory metrics">
+        {[
+          ["Total products", totalProducts, "bi-box-seam", "blue"],
+          ["Units in stock", Number(summary?.total_stock || 0), "bi-stack", "violet"],
+          ["Low stock", lowStock, "bi-exclamation-triangle", "amber"],
+          ["Out of stock", outOfStock, "bi-x-circle", "red"],
+        ].map(([label, value, icon, tone]) => (
+          <article className="shadcn-card shadcn-metric-card" key={label}>
+            <div className="shadcn-metric-top"><span>{label}</span><i className={`bi ${icon} metric-${tone}`} /></div>
+            <strong>{loading ? "—" : number(value)}</strong>
+            <small>{label === "Units in stock" ? "Current quantity on hand" : label === "Total products" ? "Products in your catalog" : "Products that may need action"}</small>
+          </article>
+        ))}
+      </section>
+
+      <section className="shadcn-chart-grid">
+        <article className="shadcn-card">
+          <div className="shadcn-card-heading">
+            <div><h2>Stock movement</h2><p>Quantity moved in the last 7 days</p></div>
+            <Link to="/inventory">View inventory <i className="bi bi-arrow-up-right" /></Link>
+          </div>
+          <div className="shadcn-movement-chart shadcn-daily-chart">
+            <div className="shadcn-chart-gridlines"><span /><span /><span /><span /></div>
+            <div className="shadcn-daily-bars">
+              {dailyTrend.map((day) => (
+                <div className="shadcn-daily-column" key={day.date} aria-label={`${day.label}: stock in ${day.stockIn}, stock out ${day.stockOut}`}>
+                  <div className="shadcn-daily-bar-pair">
+                    <i className="shadcn-bar shadcn-bar-in" style={{ height: `${Math.max(day.stockIn ? 3 : 0, (day.stockIn / dailyMax) * 150)}px` }} title={`Stock In: ${number(day.stockIn)}`} />
+                    <i className="shadcn-bar shadcn-bar-out" style={{ height: `${Math.max(day.stockOut ? 3 : 0, (day.stockOut / dailyMax) * 150)}px` }} title={`Stock Out: ${number(day.stockOut)}`} />
+                  </div>
+                  <span>{day.label}</span>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        )}
-      </div>
+          <div className="shadcn-chart-legend">
+            <span><i className="dot-in" /> Stock In</span>
+            <span><i className="dot-out" /> Stock Out</span>
+            <strong>Net: <em className={net < 0 ? "negative" : ""}>{net > 0 ? "+" : ""}{loading ? "—" : number(net)}</em> units</strong>
+          </div>
+        </article>
 
-      <div className="dashboard-two-column analytics-bottom-grid">
-        <div className="dashboard-panel">
-          <div className="dashboard-panel-title"><div><i className="bi bi-lightbulb-fill" /><strong>Inventory Insight</strong></div></div>
-          <div className="analytics-insight">
-            <strong>{outOfStock > 0 ? "Inventory attention required" : lowStock > 0 ? "Some products need attention" : "Inventory is currently healthy"}</strong>
-            <p>{outOfStock > 0 ? `${outOfStock} product${outOfStock === 1 ? "" : "s"} currently have zero stock.` : lowStock > 0 ? `${lowStock} product${lowStock === 1 ? "" : "s"} are at or below the minimum stock level.` : "No low or out-of-stock products are currently recorded."}</p>
+        <article className="shadcn-card">
+          <div className="shadcn-card-heading">
+            <div><h2>Inventory health</h2><p>Product count by stock status</p></div>
           </div>
-        </div>
-        <div className="dashboard-panel">
-          <div className="dashboard-panel-title"><div><i className="bi bi-arrow-left-right" /><strong>Movement Summary</strong></div><span>Last 7 days</span></div>
-          <div className="analytics-summary-list">
-            <div><span>Stock In</span><strong>{stockIn.toLocaleString()}</strong></div>
-            <div><span>Stock Out</span><strong>{stockOut.toLocaleString()}</strong></div>
-            <div><span>Net Movement</span><strong className={net >= 0 ? "text-green" : "text-red"}>{net >= 0 ? "+" : ""}{net.toLocaleString()}</strong></div>
+          <div className="shadcn-health">
+            <div className="shadcn-donut" style={{ background: `conic-gradient(#16a34a 0 ${(inStock / totalHealth) * 100}%, #f59e0b ${(inStock / totalHealth) * 100}% ${((inStock + lowStock) / totalHealth) * 100}%, #ef4444 ${((inStock + lowStock) / totalHealth) * 100}% 100%)` }}>
+              <div><strong>{loading ? "—" : number(totalProducts)}</strong><span>products</span></div>
+            </div>
+            <div className="shadcn-health-list">
+              {[["In stock", inStock, "green"], ["Low stock", lowStock, "amber"], ["Out of stock", outOfStock, "red"]].map(([label, value, tone]) => (
+                <div key={label}><span><i className={`health-dot health-${tone}`} />{label}</span><strong>{loading ? "—" : number(value)}</strong></div>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
+        </article>
+      </section>
+
+      <section className="shadcn-lower-grid">
+        <article className="shadcn-card">
+          <div className="shadcn-card-heading">
+            <div><h2>Stock by category</h2><p>{number(totalCategoryStock)} units across all categories</p></div>
+            <Link to="/categories">Manage categories <i className="bi bi-arrow-up-right" /></Link>
+          </div>
+          {topCategories.length === 0 ? <div className="shadcn-empty">No category data available.</div> : (
+            <div className="shadcn-category-list">
+              {topCategories.map((item, index) => {
+                const quantity = Number(item.total_stock || 0);
+                return (
+                  <div className="shadcn-category-row" key={`${item.category_name}-${index}`}>
+                    <div className="shadcn-category-label"><strong>{item.category_name}</strong><span>{number(quantity)} units</span></div>
+                    <div className="shadcn-progress"><span style={{ width: `${(quantity / maxCategoryStock) * 100}%` }} /></div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </article>
+
+        <article className="shadcn-card shadcn-insight-card">
+          <div className="shadcn-card-heading"><div><h2>Inventory insight</h2><p>Recommended next step</p></div><i className="bi bi-lightbulb shadcn-insight-icon" /></div>
+          <div className={`shadcn-insight ${outOfStock > 0 ? "insight-red" : lowStock > 0 ? "insight-amber" : "insight-green"}`}>
+            <strong>{outOfStock > 0 ? "Restock needed" : lowStock > 0 ? "Review low-stock items" : "Inventory looks healthy"}</strong>
+            <p>{outOfStock > 0 ? `${number(outOfStock)} product${outOfStock === 1 ? "" : "s"} currently have zero stock.` : lowStock > 0 ? `${number(lowStock)} product${lowStock === 1 ? "" : "s"} are at or below the minimum stock level.` : "No low or out-of-stock products are currently recorded."}</p>
+            <Link to="/inventory">Open inventory <i className="bi bi-arrow-right" /></Link>
+          </div>
+        </article>
+      </section>
     </div>
   );
 }

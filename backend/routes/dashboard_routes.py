@@ -225,15 +225,35 @@ def get_stock_movement_chart():
 
             ORDER BY sm.movement_type ASC
             """,
-            (current_store_id, days)
+            (current_store_id, days - 1)
         )
 
         movement_data = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT
+                DATE_FORMAT(sm.movement_date, '%Y-%m-%d') AS movement_date,
+                COALESCE(SUM(CASE WHEN sm.movement_type = 'STOCK_IN' THEN sm.quantity ELSE 0 END), 0) AS stock_in,
+                COALESCE(SUM(CASE WHEN sm.movement_type = 'STOCK_OUT' THEN sm.quantity ELSE 0 END), 0) AS stock_out
+            FROM stock_movements sm
+            JOIN products p
+                ON sm.product_id = p.product_id
+                AND sm.store_id = p.store_id
+            WHERE sm.store_id = %s
+              AND DATE(sm.movement_date) >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+              AND sm.movement_type IN ('STOCK_IN', 'STOCK_OUT')
+            GROUP BY DATE(sm.movement_date)
+            ORDER BY DATE(sm.movement_date) ASC
+            """,
+            (current_store_id, days - 1)
+        )
+        daily_data = cursor.fetchall()
 
         return jsonify({
             "chart": "stock_movements",
             "period_days": days,
-            "data": movement_data
+            "data": movement_data,
+            "daily_data": daily_data
         }), 200
 
     except Exception as e:

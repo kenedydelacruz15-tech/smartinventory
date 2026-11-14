@@ -19,12 +19,46 @@ const emptyForm = {
   image_url: "",
 };
 
+const isProductFieldInvalid = (field, value) => {
+  if (field === "product_name" || field === "sku") {
+    return !String(value || "").trim();
+  }
+
+  if (field === "category_id") {
+    return !value;
+  }
+
+  if (field === "selling_price") {
+    const price = Number(value);
+    return (
+      value === "" ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      Math.abs(price * 100 - Math.round(price * 100)) > 1e-8
+    );
+  }
+
+  if (field === "reorder_level") {
+    const reorderLevel = Number(value);
+    return (
+      value === "" ||
+      !Number.isFinite(reorderLevel) ||
+      reorderLevel < 0 ||
+      !Number.isInteger(reorderLevel)
+    );
+  }
+
+  return false;
+};
+
 export default function Products() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
 
   const [form, setForm] = useState(emptyForm);
+  const [validationErrors, setValidationErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
 
   const [filter, setFilter] = useState("active");
   const [search, setSearch] = useState("");
@@ -142,6 +176,11 @@ export default function Products() {
       ...prev,
       [name]: value,
     }));
+    setValidationErrors((prev) => (
+      Object.prototype.hasOwnProperty.call(prev, name)
+        ? { ...prev, [name]: isProductFieldInvalid(name, value) }
+        : prev
+    ));
 
     setError("");
     setSuccess("");
@@ -151,13 +190,21 @@ export default function Products() {
 
   const resetForm = () => {
     setForm({ ...emptyForm });
+    setValidationErrors({});
     setEditingId(null);
+    setFormOpen(false);
     setError("");
     setSuccess("");
     setLookupResult(null);
     setDuplicateProduct(null);
     setDuplicateOverride(false);
     setPreviewImage(null);
+  };
+
+  const closeProductForm = async () => {
+    if (loading || barcodeLoading) return;
+    if (scannerRef.current) await stopScanner();
+    resetForm();
   };
 
   // Search
@@ -235,6 +282,16 @@ export default function Products() {
           data.description ||
           prev.description
       }));
+      if (data.product_name) {
+        setValidationErrors((prev) => (
+          Object.prototype.hasOwnProperty.call(prev, "product_name")
+            ? {
+                ...prev,
+                product_name: isProductFieldInvalid("product_name", data.product_name),
+              }
+            : prev
+        ));
+      }
 
       setSuccess(
         data.message ||
@@ -398,36 +455,21 @@ export default function Products() {
     setError("");
     setSuccess("");
 
-    if (!form.product_name.trim()) {
-      setError("Product name is required.");
+    const nextValidationErrors = {
+      product_name: isProductFieldInvalid("product_name", form.product_name),
+      sku: isProductFieldInvalid("sku", form.sku),
+      category_id: isProductFieldInvalid("category_id", form.category_id),
+      selling_price: isProductFieldInvalid("selling_price", form.selling_price),
+      reorder_level: isProductFieldInvalid("reorder_level", form.reorder_level),
+    };
+    setValidationErrors(nextValidationErrors);
+
+    if (Object.values(nextValidationErrors).some(Boolean)) {
+      setError("Please complete the highlighted required fields.");
       return;
     }
 
-    if (!form.sku.trim()) {
-      setError("SKU is required.");
-      return;
-    }
-
-    if (!form.category_id) {
-      setError("Please select a category.");
-      return;
-    }
-
-    if (
-      form.selling_price === "" ||
-      Number(form.selling_price) < 0
-    ) {
-      setError("Please enter a valid selling price.");
-      return;
-    }
-
-    if (
-      form.reorder_level === "" ||
-      Number(form.reorder_level) < 0
-    ) {
-      setError("Please enter a valid minimum stock level.");
-      return;
-    }
+    setValidationErrors({});
 
     if (editingId === null && duplicateProduct && !duplicateOverride) {
       setError("This barcode already belongs to an existing product. Choose an option in the duplicate warning before saving.");
@@ -497,8 +539,11 @@ export default function Products() {
         );
       }
 
+      if (scannerRef.current) await stopScanner();
       setForm({ ...emptyForm });
+      setValidationErrors({});
       setEditingId(null);
+      setFormOpen(false);
 
       await loadProducts();
     } catch (err) {
@@ -615,6 +660,8 @@ export default function Products() {
 
   const handleEdit = (product) => {
     setEditingId(product.product_id);
+    setFormOpen(true);
+    setValidationErrors({});
 
     setForm({
       product_name:
@@ -983,13 +1030,23 @@ export default function Products() {
             product information.
           </p>
         </div>
+        <button
+          type="button"
+          className="primary"
+          onClick={() => {
+            resetForm();
+            setFormOpen(true);
+          }}
+        >
+          <i className="bi bi-plus-lg" /> Add Product
+        </button>
       </div>
 
       {/* =====================================================
           ALERTS
       ===================================================== */}
 
-      {error && (
+      {error && !formOpen && (
         <div className="alert">
           {error}
         </div>
@@ -1021,11 +1078,19 @@ export default function Products() {
           PRODUCT FORM
       ===================================================== */}
 
+      {formOpen && (
+        <div
+          className="inventory-modal-overlay product-form-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeProductForm();
+          }}
+        >
+        <div className="product-form-dialog" role="dialog" aria-modal="true" aria-labelledby="product-form-title" onMouseDown={(event) => event.stopPropagation()}>
       <div className="product-form-card">
 
         <div className="form-header">
           <div>
-            <h2>
+            <h2 id="product-form-title">
               {editingId !== null
                 ? "Edit Product"
                 : "Add Product"}
@@ -1037,8 +1102,14 @@ export default function Products() {
                 product ID #{editingId}
               </p>
             )}
+            <p className="product-required-note"><span className="required-mark">*</span> Required fields</p>
           </div>
+          <button type="button" className="product-form-close" onClick={closeProductForm} aria-label="Close product form" disabled={loading || barcodeLoading}>
+            <i className="bi bi-x-lg" />
+          </button>
         </div>
+
+        {error && <div className="alert alert-error" role="alert">{error}</div>}
 
         {/* =================================================
             BARCODE SCANNER
@@ -1123,6 +1194,7 @@ export default function Products() {
                     description: existing.description || "",
                   }));
                   setEditingId(existing.product_id);
+                  setValidationErrors({});
                   setDuplicateProduct(null);
                   setDuplicateOverride(false);
                   setError("");
@@ -1296,34 +1368,40 @@ export default function Products() {
 
         <form
           onSubmit={handleSubmit}
+          noValidate
           className="product-form"
         >
 
           {/* PRODUCT NAME */}
 
-          <div className="form-field">
-            <label>Product Name</label>
+          <div className={`form-field ${validationErrors.product_name ? "form-field-invalid" : ""}`}>
+            <label htmlFor="product-name">Product Name <span className="required-mark">*</span></label>
 
             <input
+              id="product-name"
               type="text"
               name="product_name"
               placeholder="Enter product name"
               value={form.product_name}
               onChange={handleChange}
+              autoFocus
               disabled={
                 loading ||
                 barcodeLoading
               }
               required
+              aria-invalid={Boolean(validationErrors.product_name)}
             />
+            {validationErrors.product_name && <small className="field-validation-message">Product name is required.</small>}
           </div>
 
           {/* SKU */}
 
-          <div className="form-field">
-            <label>SKU</label>
+          <div className={`form-field ${validationErrors.sku ? "form-field-invalid" : ""}`}>
+            <label htmlFor="product-sku">SKU <span className="required-mark">*</span></label>
 
             <input
+              id="product-sku"
               type="text"
               name="sku"
               placeholder="Example: BP-001"
@@ -1334,7 +1412,9 @@ export default function Products() {
                 barcodeLoading
               }
               required
+              aria-invalid={Boolean(validationErrors.sku)}
             />
+            {validationErrors.sku && <small className="field-validation-message">SKU is required.</small>}
           </div>
 
           {/* BARCODE / EAN */}
@@ -1453,15 +1533,17 @@ export default function Products() {
 
           {/* CATEGORY */}
 
-          <div className="form-field">
-            <label>Category</label>
+          <div className={`form-field ${validationErrors.category_id ? "form-field-invalid" : ""}`}>
+            <label htmlFor="product-category">Category <span className="required-mark">*</span></label>
 
             <select
+              id="product-category"
               name="category_id"
               value={form.category_id}
               onChange={handleChange}
               disabled={loading}
               required
+              aria-invalid={Boolean(validationErrors.category_id)}
             >
               <option value="">
                 Select Category
@@ -1484,14 +1566,16 @@ export default function Products() {
                 )
               )}
             </select>
+            {validationErrors.category_id && <small className="field-validation-message">Please select a category.</small>}
           </div>
 
           {/* SELLING PRICE */}
 
-          <div className="form-field">
-            <label>Selling Price</label>
+          <div className={`form-field ${validationErrors.selling_price ? "form-field-invalid" : ""}`}>
+            <label htmlFor="product-selling-price">Selling Price <span className="required-mark">*</span></label>
 
             <input
+              id="product-selling-price"
               type="number"
               name="selling_price"
               placeholder="0.00"
@@ -1501,15 +1585,18 @@ export default function Products() {
               step="0.01"
               disabled={loading}
               required
+              aria-invalid={Boolean(validationErrors.selling_price)}
             />
+            {validationErrors.selling_price && <small className="field-validation-message">Enter a valid price of 0 or more, with up to 2 decimal places.</small>}
           </div>
 
           {/* REORDER LEVEL */}
 
-          <div className="form-field">
-            <label>Minimum Stock Level (Units)</label>
+          <div className={`form-field ${validationErrors.reorder_level ? "form-field-invalid" : ""}`}>
+            <label htmlFor="product-reorder-level">Minimum Stock Level (Units) <span className="required-mark">*</span></label>
 
             <input
+              id="product-reorder-level"
               type="number"
               name="reorder_level"
               placeholder="Enter minimum stock units"
@@ -1519,7 +1606,9 @@ export default function Products() {
               step="1"
               disabled={loading}
               required
+              aria-invalid={Boolean(validationErrors.reorder_level)}
             />
+            {validationErrors.reorder_level && <small className="field-validation-message">Enter a whole number of 0 or more.</small>}
             <small className="field-help">Minimum quantity to keep available before the inventory status becomes Needs Attention.</small>
           </div>
 
@@ -1553,28 +1642,26 @@ export default function Products() {
               {loading
                 ? "Saving..."
                 : editingId !== null
-                ? "✓ Update Product"
-                : "+ Add Product"}
+                ? "Save Changes"
+                : "Save"}
             </button>
 
-            {editingId !== null && (
-              <button
-                type="button"
-                className="secondary cancel-button"
-                onClick={resetForm}
-                disabled={
-                  loading ||
-                  barcodeLoading
-                }
-              >
-                ✕ Cancel
-              </button>
-            )}
+            <button
+              type="button"
+              className="secondary cancel-button"
+              onClick={closeProductForm}
+              disabled={loading || barcodeLoading}
+            >
+              Cancel
+            </button>
 
           </div>
 
         </form>
       </div>
+        </div>
+        </div>
+      )}
 
       {/* =====================================================
           SEARCH / FILTER TOOLBAR

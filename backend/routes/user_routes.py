@@ -280,6 +280,14 @@ def login():
                 "store_id": user["store_id"]
             }
         )
+        create_audit_log(
+            user.get("store_id"),
+            "USER_LOGIN",
+            "AUTH",
+            user["user_id"],
+            f"{user['username']} signed in.",
+            user["user_id"],
+        )
 
         return jsonify({
             "message": "Login successful.",
@@ -309,6 +317,23 @@ def login():
         # Returns the connection to the pool.
         if connection:
             connection.close()
+
+
+@user_bp.route("/logout", methods=["POST"])
+@jwt_required()
+def logout():
+    claims = get_jwt()
+    user_id = int(get_jwt_identity())
+    username = claims.get("username") or "User"
+    create_audit_log(
+        claims.get("store_id"),
+        "USER_LOGOUT",
+        "AUTH",
+        user_id,
+        f"{username} signed out.",
+        user_id,
+    )
+    return jsonify({"message": "Logout recorded."}), 200
 
 
 # Allows an OWNER to create STAFF accounts for their own store.

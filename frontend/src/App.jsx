@@ -15,6 +15,7 @@ import StaffDashboard from "./pages/StaffDashboard";
 import Categories from "./pages/Categories";
 import Products from "./pages/Products";
 import Inventory from "./pages/Inventory";
+import Suppliers from "./pages/Suppliers";
 import StoreSettings from "./pages/StoreSettings";
 import AdminUsers from "./pages/AdminUsers";
 import AdminStores from "./pages/AdminStores";
@@ -63,10 +64,11 @@ const navItems = {
   ],
 
   OWNER: [
+    ["Categories", "/categories", "bi-grid"],
     ["Dashboard", "/owner/dashboard", "bi-speedometer2"],
     ["Inventory", "/inventory", "bi-box-seam"],
     ["Products", "/products", "bi-bag"],
-    ["Categories", "/categories", "bi-grid"],
+    ["Suppliers", "/suppliers", "bi-truck"],
     ["Staff", "/staff", "bi-person-badge"],
     ["Analytics", "/analytics", "bi-bar-chart-line"],
     ["Reports", "/reports", "bi-file-earmark-bar-graph"],
@@ -75,10 +77,11 @@ const navItems = {
   ],
 
   STAFF: [
+    ["Categories", "/categories", "bi-grid"],
     ["Dashboard", "/staff/dashboard", "bi-speedometer2"],
     ["Inventory", "/inventory", "bi-box-seam"],
-    ["Categories", "/categories", "bi-grid"],
     ["Products", "/products", "bi-bag"],
+    ["Suppliers", "/suppliers", "bi-truck"],
   ],
 };
 
@@ -139,8 +142,15 @@ function Layout() {
 
   const signOut = () => {
     if (window.confirm("Sign out of SmartInventory?")) {
-      logout();
-      navigate("/login", { replace: true });
+      api.post("/api/users/logout")
+        .catch((error) => {
+          console.error("Could not record logout:", error);
+          window.alert("You were signed out, but the logout event could not be saved to the audit log.");
+        })
+        .finally(() => {
+          logout();
+          navigate("/login", { replace: true });
+        });
     }
   };
 
@@ -210,6 +220,7 @@ function Layout() {
             aria-label="Sign out"
           >
             <i className="bi bi-box-arrow-right" />
+            <span>Logout</span>
           </button>
         </div>
       </aside>
@@ -297,6 +308,15 @@ function Layout() {
               element={
                 <Protected roles={["OWNER", "STAFF"]}>
                   <Inventory />
+                </Protected>
+              }
+            />
+
+            <Route
+              path="/suppliers"
+              element={
+                <Protected roles={["OWNER", "STAFF"]}>
+                  <Suppliers />
                 </Protected>
               }
             />

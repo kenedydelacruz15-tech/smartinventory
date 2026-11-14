@@ -80,6 +80,7 @@ def stock_movement_report():
             stock_movements.movement_id,
             products.product_id,
             products.product_name,
+            categories.category_name,
             stock_movements.movement_type,
             stock_movements.quantity,
             stock_movements.reference_id,
@@ -87,6 +88,9 @@ def stock_movement_report():
         FROM stock_movements
         JOIN products
             ON stock_movements.product_id = products.product_id
+        LEFT JOIN categories
+            ON products.category_id = categories.category_id
+            AND categories.store_id = products.store_id
         WHERE products.store_id = %s
         ORDER BY stock_movements.movement_date DESC,
                  stock_movements.movement_id DESC

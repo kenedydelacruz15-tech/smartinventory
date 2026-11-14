@@ -65,7 +65,7 @@ export default function Reports() {
     const query = search.trim().toLowerCase();
     return movements.filter((item) =>
       !query ||
-      [item.product_name, item.movement_type, item.reference_id]
+      [item.product_name, item.category_name, item.movement_type, item.reference_id]
         .some((value) => String(value ?? "").toLowerCase().includes(query))
     );
   }, [movements, search]);
@@ -101,6 +101,75 @@ export default function Reports() {
     );
   };
 
+  const exportPdf = async () => {
+    try {
+      setError("");
+      const { jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      let y = 16;
+      const title = report === "inventory" ? "Current Inventory by Category" : "Stock Movements by Category";
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(18);
+      pdf.text(title, 14, y);
+      y += 7;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.text(`KEN Motorparts | Generated ${new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Manila" }).format(new Date())} (Manila time)`, 14, y);
+      y += 10;
+
+      const rows = report === "inventory" ? visibleInventory : visibleMovements;
+      const groupedRows = rows.reduce((groups, item) => {
+        const category = String(item.category_name || "Uncategorized");
+        (groups[category] ||= []).push(item);
+        return groups;
+      }, {});
+      const categories = Object.keys(groupedRows).sort((a, b) => a.localeCompare(b));
+
+      const writeLine = (text, options = {}) => {
+        pdf.setFont("helvetica", options.bold ? "bold" : "normal");
+        pdf.setFontSize(options.size || 9);
+        const lines = pdf.splitTextToSize(String(text), pageWidth - 28);
+        lines.forEach((line) => {
+          if (y > pageHeight - 14) {
+            pdf.addPage();
+            y = 16;
+          }
+          pdf.text(line, 14, y);
+          y += options.gap || 6;
+        });
+      };
+
+      categories.forEach((category) => {
+        if (y > pageHeight - 22) {
+          pdf.addPage();
+          y = 16;
+        }
+        writeLine(category, { bold: true, size: 12, gap: 7 });
+        if (report === "inventory") {
+          groupedRows[category].forEach((item) => {
+            writeLine(`${item.product_name}  |  Stock: ${Number(item.stock_quantity || 0).toLocaleString()}  |  Unit price: PHP ${Number(item.price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}  |  Total value: PHP ${Number(item.total_value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+          });
+        } else {
+          groupedRows[category].forEach((item) => {
+            const date = item.movement_date ? new Intl.DateTimeFormat("en-PH", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Manila" }).format(new Date(item.movement_date)) : "-";
+            writeLine(`${date}  |  ${item.product_name}  |  ${item.movement_type}  |  Qty: ${Number(item.quantity || 0).toLocaleString()}  |  Ref: ${item.reference_id ?? "-"}`);
+          });
+        }
+        y += 3;
+        pdf.setDrawColor(220);
+        pdf.line(14, y - 2, pageWidth - 14, y - 2);
+      });
+
+      if (categories.length === 0) writeLine("No records match the selected report and search.", { size: 10 });
+      pdf.save(report === "inventory" ? "smartinventory-inventory-by-category.pdf" : "smartinventory-movements-by-category.pdf");
+    } catch (err) {
+      console.error("PDF report generation error:", err);
+      setError("Could not generate the categorized PDF report.");
+    }
+  };
+
   const currency = (value) =>
     `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -118,6 +187,9 @@ export default function Reports() {
           <button type="button" className="primary" onClick={exportReport} disabled={loading}>
             <i className="bi bi-download" /> Export CSV
           </button>
+          <button type="button" className="secondary" onClick={exportPdf} disabled={loading}>
+            <i className="bi bi-file-earmark-pdf" /> Download PDF
+          </button>
         </div>
       </header>
 
@@ -131,7 +203,7 @@ export default function Reports() {
         <input
           className="report-search"
           type="search"
-          placeholder={report === "inventory" ? "Search product or category..." : "Search product, type, or reference..."}
+          placeholder={report === "inventory" ? "Search product or category..." : "Search product, category, type, or reference..."}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           aria-label="Search report rows"
@@ -167,14 +239,15 @@ export default function Reports() {
         ) : (
           <div className="table-container report-table-container">
             <table className="data-table">
-              <thead><tr><th>Date</th><th>Product</th><th>Movement</th><th>Quantity</th><th>Reference</th><th>Movement ID</th></tr></thead>
+              <thead><tr><th>Date</th><th>Product</th><th>Category</th><th>Movement</th><th>Quantity</th><th>Reference</th><th>Movement ID</th></tr></thead>
               <tbody>
                 {visibleMovements.length === 0 ? (
-                  <tr><td className="empty-state" colSpan="6"><h3>No stock movements</h3><p>No records match your search, or no stock movements have been recorded.</p></td></tr>
+                  <tr><td className="empty-state" colSpan="7"><h3>No stock movements</h3><p>No records match your search, or no stock movements have been recorded.</p></td></tr>
                 ) : visibleMovements.map((item) => (
                   <tr key={item.movement_id}>
-                    <td>{item.movement_date ? new Date(item.movement_date).toLocaleString() : "—"}</td>
+                    <td>{item.movement_date ? new Intl.DateTimeFormat("en-PH", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Manila" }).format(new Date(item.movement_date)) : "—"}</td>
                     <td><strong>{item.product_name}</strong><small className="report-subtext">ID: {item.product_id}</small></td>
+                    <td>{item.category_name || "Uncategorized"}</td>
                     <td><span className={`status-badge ${item.movement_type === "STOCK_IN" ? "success" : "warning"}`}>{item.movement_type}</span></td>
                     <td>{Number(item.quantity || 0).toLocaleString()}</td>
                     <td>{item.reference_id ?? "—"}</td>
