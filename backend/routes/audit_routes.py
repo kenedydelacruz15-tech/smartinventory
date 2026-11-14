@@ -1,5 +1,6 @@
 """Audit-log API routes for SmartInventory's current audit_logs schema."""
 import json
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
@@ -8,6 +9,7 @@ from backend.database import get_db_connection
 from backend.audit_logger import ensure_audit_logs_table
 
 audit_bp = Blueprint("audit_bp", __name__)
+MANILA_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def _decode_details(value):
@@ -26,6 +28,7 @@ def _fetch_logs(where_sql="", params=None, limit=250):
         connection = get_db_connection()
         ensure_audit_logs_table(connection)
         cursor = connection.cursor(dictionary=True)
+        cursor.execute("SET time_zone = '+08:00'")
         sql = """
             SELECT log_id, actor_user_id, actor_name, actor_role, store_id,
                    event_category, action, entity_type, entity_id,
@@ -40,6 +43,13 @@ def _fetch_logs(where_sql="", params=None, limit=250):
 
         for record in records:
             record["details"] = _decode_details(record.get("details"))
+            created_at = record.get("created_at")
+            if isinstance(created_at, datetime):
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=MANILA_TIMEZONE)
+                else:
+                    created_at = created_at.astimezone(MANILA_TIMEZONE)
+                record["created_at"] = created_at.isoformat()
             # Backward-compatible keys used by the current React table.
             record["audit_log_id"] = record.get("log_id")
             record["user_id"] = record.get("actor_user_id")

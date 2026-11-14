@@ -1187,16 +1187,17 @@ html[data-theme="dark"] .login-page .login-footer {
 }
 
 .login-page .login-brand {
-  gap: 15px;
+  gap: 18px;
   color: #fff;
 }
 
 .login-page .login-brand-logo {
-  width: 74px;
-  height: 74px;
+  width: 132px;
+  height: 132px;
   object-fit: contain;
   border: 2px solid #ffd447;
-  border-radius: 8px;
+  border-radius: 11px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.2),0 0 0 4px rgba(255,212,71,.1);
 }
 
 .login-page .login-brand > span {
@@ -1206,13 +1207,13 @@ html[data-theme="dark"] .login-page .login-footer {
 }
 
 .login-page .login-brand > span strong {
-  font-size: 15px;
+  font-size: 17px;
   letter-spacing: 1.2px;
 }
 
 .login-page .login-brand > span small {
   color: #fff0b3;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 650;
   letter-spacing: 1.1px;
 }
@@ -1346,8 +1347,20 @@ html[data-theme="dark"] .login-page .login-footer {
   }
 
   .login-page .login-brand-logo {
-    width: 56px;
-    height: 56px;
+    width: 96px;
+    height: 96px;
+  }
+
+  .login-page .login-brand {
+    gap: 10px;
+  }
+
+  .login-page .login-brand > span strong {
+    font-size: 15px;
+  }
+
+  .login-page .login-brand > span small {
+    font-size: 8px;
   }
 
   .login-page .login-visual-copy {

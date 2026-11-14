@@ -92,7 +92,13 @@ def create_audit_log(store_id, action, entity_type, entity_id=None, description=
             finally:
                 if actor_cursor:
                     actor_cursor.close()
-        claims = get_jwt() if user_id is not None else {}
+        claims = {}
+        if user_id is not None and (not actor_name or not actor_role):
+            try:
+                claims = get_jwt()
+            except RuntimeError:
+                # Successful login audit events are written before a JWT is attached to the request.
+                claims = {}
         actor_role = actor_role or str(claims.get("role") or "").upper() or None
         if not actor_name and actor_role in ("OWNER", "STAFF"):
             actor_name = claims.get("username")

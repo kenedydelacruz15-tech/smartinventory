@@ -1,19 +1,19 @@
 .motorparts-home .smart-home-logo img {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
   object-fit: cover;
   border: 1px solid #ffffff24;
   border-radius: 7px;
 }
 
 .motorparts-home .smart-home-logo>span:last-child {
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: .3px;
 }
 
 .motorparts-home .smart-home-logo small {
-  font-size: 7px;
+  font-size: 8px;
   letter-spacing: .8px;
 }
 
@@ -231,9 +231,9 @@
 }
 
 .motorparts-home .smart-home-footer .smart-home-logo img {
-  width: 35px;
-  height: 35px;
-  flex-basis: 35px;
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
 }
 
 @media (max-width: 1120px) {
@@ -269,17 +269,17 @@
 
 @media (max-width: 540px) {
   .motorparts-home .smart-home-logo img {
-    width: 34px;
-    height: 34px;
-    flex-basis: 34px;
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
   }
 
   .motorparts-home .smart-home-logo>span:last-child {
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .motorparts-home .smart-home-logo small {
-    font-size: 6px;
+    font-size: 7px;
     letter-spacing: .5px;
   }
 

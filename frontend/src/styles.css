@@ -2423,8 +2423,8 @@ html[data-theme="dark"] *::-webkit-scrollbar-thumb:hover { background:#5b7695 !i
 }
 
 .sidebar .brand-logo {
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   flex: none;
   border: 2px solid #ffd447;
   border-radius: 8px;
@@ -3093,6 +3093,10 @@ html[data-theme="dark"] .categories-page .category-name-cell,
 html[data-theme="dark"] .categories-page .category-stat strong,
 html[data-theme="dark"] .categories-page .categories-card .empty-state h3{color:#f0f5fb}
 @media(max-width:800px){
+  .sidebar .brand-logo {
+    width: 46px;
+    height: 46px;
+  }
   .categories-page .categories-stats{gap:9px}
   .categories-page .categories-toolbar{align-items:stretch;flex-direction:column}
   .categories-page .category-search{width:100%;max-width:none}
@@ -3127,3 +3131,56 @@ html[data-theme="dark"] .product-form .field-validation-message{color:#fca5a5}
 html[data-theme="dark"] .product-form .form-field-invalid input,
 html[data-theme="dark"] .product-form .form-field-invalid select,
 html[data-theme="dark"] .product-form .form-field-invalid textarea{border-color:#f87171!important;background:#2a1b24!important;box-shadow:0 0 0 3px rgba(248,113,113,.12)!important}
+
+/* App-wide readable type scale */
+.app-shell{font-size:16px}
+.app-shell .brand strong{font-size:19px}
+.app-shell .brand span,.app-shell .sidebar-user-info span{font-size:12px}
+.app-shell .sidebar-user-info strong{font-size:15px}
+.app-shell .nav-caption{font-size:12px}
+.app-shell .sidebar-nav a{min-height:44px;font-size:16px}
+.app-shell .topbar-search,.app-shell .top-user{font-size:14px}
+.app-shell .store-pill,.app-shell .role-pill{font-size:13px}
+.app-shell .page-header h1,.app-shell .products-header h1,.app-shell .categories-header h1{font-size:34px!important;line-height:1.12}
+.app-shell .page-header p,.app-shell .products-header p,.app-shell .categories-header p{font-size:15px!important;line-height:1.55}
+.app-shell .eyebrow{font-size:11px}
+.app-shell .section-header h2,.app-shell .form-header h2,.app-shell .table-header h2{font-size:20px}
+.app-shell .form-header p,.app-shell .table-header span{font-size:13px}
+.app-shell .stat-label,.app-shell .inventory-summary-card span,.app-shell .staff-summary-card span{font-size:14px}
+.app-shell .stat-card small,.app-shell .inventory-summary-card small,.app-shell .staff-summary-card small{font-size:12px}
+.app-shell .inventory-category-sidebar button{font-size:14px}
+.app-shell .inventory-dashboard .dashboard-kpi span{font-size:14px}
+.app-shell .inventory-dashboard .dashboard-kpi small{font-size:12px}
+.app-shell .table-container th,.app-shell .table-wrapper th,.app-shell .data-table th{font-size:12px!important;line-height:1.4}
+.app-shell .table-container td,.app-shell .table-wrapper td,.app-shell .data-table td{font-size:16px!important;line-height:1.45}
+.app-shell .table-container td strong,.app-shell .table-wrapper td strong,.app-shell .data-table td strong{font-size:16px!important}
+.app-shell .status-badge,.app-shell .status-chip,.app-shell .role-badge,.app-shell .role-chip,.app-shell .store-chip{font-size:12px!important}
+.app-shell .primary,.app-shell .secondary,.app-shell .btn,.app-shell .action-button,
+.app-shell .search-button,.app-shell .filter-btn,.app-shell .category-filter-btn{font-size:14px!important}
+.app-shell .form-field label,.app-shell .form-group label{font-size:14px!important}
+.app-shell input,.app-shell select,.app-shell textarea{font-size:15px}
+.app-shell .product-toolbar input,.app-shell .product-toolbar select,
+.app-shell .categories-toolbar input,.app-shell .categories-toolbar select{font-size:15px!important}
+.app-shell .product-form-card .form-field small,.app-shell .field-help{font-size:12px}
+@media(max-width:800px){
+  .app-shell .page-header h1,.app-shell .products-header h1,.app-shell .categories-header h1{font-size:32px!important}
+  .app-shell .page-header p,.app-shell .products-header p,.app-shell .categories-header p{font-size:14px!important}
+}
+@media(max-width:480px){
+  .app-shell .page-header h1,.app-shell .products-header h1,.app-shell .categories-header h1{font-size:29px!important}
+  .app-shell .content-area{padding:16px}
+}
+
+.app-shell .sidebar-user{gap:10px;padding:12px 9px;border-radius:12px}
+.app-shell .sidebar-user .avatar{width:36px;height:36px;font-size:15px}
+.app-shell .sidebar-user-info strong{font-size:15px!important}
+.app-shell .sidebar-user-info span{font-size:12px!important}
+.app-shell .nav-caption{padding:0 11px 8px;font-size:12px!important;letter-spacing:1.2px}
+.app-shell .sidebar-nav{gap:4px}
+.app-shell .sidebar-nav a{min-height:44px;padding:11px 12px;font-size:16px!important}
+.app-shell .sidebar-nav a i{width:19px;font-size:18px}
+.app-shell .logout-icon{min-height:40px;font-size:13px}
+@media(max-width:800px){
+  .app-shell .sidebar-nav a{min-height:46px}
+  .app-shell .sidebar-nav a i{font-size:19px}
+}
