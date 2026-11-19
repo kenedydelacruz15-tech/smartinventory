@@ -70,6 +70,7 @@ def get_inventory():
                 p.product_name,
                 p.sku,
                 p.part_number,
+                p.barcode,
                 p.brand,
                 p.selling_price,
                 p.reorder_level,
@@ -106,11 +107,12 @@ def get_inventory():
             """
 
         if search:
-
             sql += """
                 AND (
                     p.product_name LIKE %s
                     OR p.sku LIKE %s
+                    OR p.part_number LIKE %s
+                    OR p.barcode LIKE %s
                     OR p.brand LIKE %s
                     OR c.category_name LIKE %s
                 )
@@ -119,6 +121,8 @@ def get_inventory():
             value = f"%{search}%"
 
             params.extend([
+                value,
+                value,
                 value,
                 value,
                 value,
@@ -198,6 +202,7 @@ def get_inventory_item(inventory_id):
                 p.product_name,
                 p.sku,
                 p.part_number,
+                p.barcode,
                 p.brand,
                 p.selling_price,
                 p.reorder_level,

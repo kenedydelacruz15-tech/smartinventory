@@ -1,6 +1,6 @@
 """Audit-log API routes for SmartInventory's current audit_logs schema."""
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
@@ -188,6 +188,22 @@ def get_audit_logs():
     if end_date:
         conditions.append("created_at < DATE_ADD(%s, INTERVAL 1 DAY)")
         params.append(end_date)
+    try:
+        if start_date:
+            date.fromisoformat(start_date)
+
+        if end_date:
+            date.fromisoformat(end_date)
+
+        if start_date and end_date and start_date > end_date:
+            return jsonify({
+                "error": "start_date must be on or before end_date."
+            }), 400
+
+    except ValueError:
+        return jsonify({
+            "error": "Dates must use YYYY-MM-DD format."
+        }), 400
 
     records, error = _fetch_logs(" AND ".join(conditions), params, limit)
     if error:

@@ -1,4 +1,5 @@
 from functools import wraps
+from multiprocessing import connection
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import (
@@ -167,7 +168,24 @@ def register_owner():
         # Gets the ID of the new owner.
         user_id = cursor.lastrowid
 
-        # Saves both the store and owner account.
+        create_audit_log(
+            action="OWNER_REGISTERED",
+            entity_type="USER",
+            entity_id=str(user_id),
+            description=f"Registered owner account for store: {store_name}.",
+            new_data={
+                "user_id": user_id,
+                "full_name": full_name,
+                "username": username,
+                "email": email,
+                "role": "OWNER",
+                "store_id": store_id,
+                "store_name": store_name
+            },
+            connection=connection
+        )
+
+        # Saves the store, owner account, and audit log together.
         connection.commit()
 
         return jsonify({
@@ -206,10 +224,10 @@ def register_owner():
 
 
 # Logs in an ADMIN, OWNER, or STAFF account.
+
 @user_bp.route("/login", methods=["POST"])
 def login():
 
-    # Gets the JSON data sent by the user.
     data = request.get_json()
 
     if not data:
@@ -217,11 +235,9 @@ def login():
             "error": "Request body is required."
         }), 400
 
-    # Gets the login credentials.
     username = data.get("username", "").strip()
     password = data.get("password", "")
 
-    # Requires both login fields.
     if not username or not password:
         return jsonify({
             "error": "Username and password are required."
@@ -230,48 +246,106 @@ def login():
     connection = None
     cursor = None
 
+    # Records a login attempt in the login_history table.
+    def record_login_attempt(
+        user_id,
+        attempted_username,
+        status,
+        failure_reason=None
+    ):
+        cursor.execute("""
+            INSERT INTO login_history (
+                user_id,
+                username,
+                login_status,
+                failure_reason,
+                ip_address,
+                user_agent
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            user_id,
+            attempted_username[:100],
+            status,
+            failure_reason,
+            request.remote_addr,
+            (request.user_agent.string or "")[:512] or None
+        ))
+
     try:
 
-        # Gets a database connection from the pool.
         connection = get_db_connection()
-
-        # Creates a dictionary cursor.
         cursor = connection.cursor(dictionary=True)
 
-        # Searches for the user.
         cursor.execute("""
             SELECT *
             FROM users
             WHERE username = %s
+            LIMIT 1
         """, (username,))
 
         user = cursor.fetchone()
 
-        # Rejects unknown usernames.
+        # Unknown username.
         if not user:
+            record_login_attempt(
+                None,
+                username,
+                "FAILED",
+                "Unknown username"
+            )
+            connection.commit()
+
             return jsonify({
                 "error": "Invalid username or password."
             }), 401
 
-        # Rejects inactive accounts.
+        # Deactivated account.
         if not user["is_active"]:
+            record_login_attempt(
+                user["user_id"],
+                username,
+                "FAILED",
+                "Account deactivated"
+            )
+            connection.commit()
+
             return jsonify({
                 "error": "This account has been deactivated."
             }), 403
 
-        # Verifies the password.
-        if not check_password_hash(user["password_hash"], password):
+        # Incorrect password.
+        if not check_password_hash(
+            user["password_hash"],
+            password
+        ):
+            record_login_attempt(
+                user["user_id"],
+                username,
+                "FAILED",
+                "Incorrect password"
+            )
+            connection.commit()
+
             return jsonify({
                 "error": "Invalid username or password."
             }), 401
 
-        # Only the three supported application roles can sign in.
+        # Unsupported application role.
         if user["role"] not in {"ADMIN", "OWNER", "STAFF"}:
+            record_login_attempt(
+                user["user_id"],
+                username,
+                "FAILED",
+                "Unsupported role"
+            )
+            connection.commit()
+
             return jsonify({
                 "error": "This account does not have a supported application role."
             }), 403
 
-        # Creates the JWT containing user and store information.
+        # Creates the JWT.
         access_token = create_access_token(
             identity=str(user["user_id"]),
             additional_claims={
@@ -280,6 +354,15 @@ def login():
                 "store_id": user["store_id"]
             }
         )
+
+        # Records successful login.
+        record_login_attempt(
+            user["user_id"],
+            username,
+            "SUCCESS"
+        )
+
+        # Records the successful login in the existing audit_logs table.
         create_audit_log(
             user.get("store_id"),
             "USER_LOGIN",
@@ -287,7 +370,11 @@ def login():
             user["user_id"],
             f"{user['username']} signed in.",
             user["user_id"],
+            connection=connection
         )
+
+        # Saves login history and audit log together.
+        connection.commit()
 
         return jsonify({
             "message": "Login successful.",
@@ -304,19 +391,21 @@ def login():
 
     except Exception as e:
 
+        if connection:
+            connection.rollback()
+
         return jsonify({
             "error": str(e)
         }), 500
 
     finally:
 
-        # Closes the database cursor.
         if cursor:
             cursor.close()
 
-        # Returns the connection to the pool.
         if connection:
             connection.close()
+
 
 
 @user_bp.route("/logout", methods=["POST"])
@@ -326,12 +415,14 @@ def logout():
     user_id = int(get_jwt_identity())
     username = claims.get("username") or "User"
     create_audit_log(
-        claims.get("store_id"),
-        "USER_LOGOUT",
-        "AUTH",
-        user_id,
-        f"{username} signed out.",
-        user_id,
+        action="USER_LOGOUT",
+        entity_type="AUTH",
+        entity_id=str(user_id),
+        description=f"{username} signed out.",
+        new_data={
+            "user_id": user_id,
+            "username": username
+        }
     )
     return jsonify({"message": "Logout recorded."}), 200
 
@@ -412,9 +503,21 @@ def create_staff():
 
         # Record staff creation with username as the actor label on future events.
         new_user_id = cursor.lastrowid
-        create_audit_log(store_id, "USER_ADDED", "USER", new_user_id,
-                         f"Added staff user: {username}", get_jwt_identity(),
-                         new_data={"username": username, "full_name": full_name, "email": email, "role": "STAFF"})
+        create_audit_log(
+            action="USER_ADDED",
+            entity_type="USER",
+            entity_id=str(new_user_id),
+            description=f"Added staff user: {username}.",
+            new_data={
+                "user_id": new_user_id,
+                "username": username,
+                "full_name": full_name,
+                "email": email,
+                "role": "STAFF",
+                "store_id": store_id
+            },
+            connection=connection
+        )
         # Saves the new staff account.
         connection.commit()
 
@@ -606,7 +709,13 @@ def update_staff(user_id):
 
         # Checks whether the staff belongs to the owner's store.
         cursor.execute("""
-            SELECT user_id, username, full_name, role
+            SELECT
+                user_id,
+                username,
+                full_name,
+                email,
+                role,
+                is_active
             FROM users
             WHERE user_id = %s
             AND store_id = %s
@@ -650,9 +759,18 @@ def update_staff(user_id):
             store_id
         ))
 
-        create_audit_log(store_id, "USER_EDITED", "USER", user_id,
-                         f"Edited staff user: {user.get('username')}", get_jwt_identity(),
-                         new_data={"full_name": full_name, "email": email})
+        create_audit_log(
+            action="USER_EDITED",
+            entity_type="USER",
+            entity_id=str(user_id),
+            description=f"Edited staff user: {user['username']}.",
+            old_data=user,
+            new_data={
+                "full_name": full_name,
+                "email": email
+            },
+            connection=connection
+        )
         # Saves the changes.
         connection.commit()
 
@@ -707,7 +825,12 @@ def deactivate_staff(user_id):
 
         # Checks whether the staff belongs to the owner's store.
         cursor.execute("""
-            SELECT user_id, username, full_name, role
+            SELECT
+                user_id,
+                username,
+                full_name,
+                role,
+                is_active
             FROM users
             WHERE user_id = %s
             AND store_id = %s
@@ -747,9 +870,17 @@ def deactivate_staff(user_id):
             store_id
         ))
 
-        create_audit_log(store_id, "USER_DEACTIVATED", "USER", user_id,
-                         f"Deactivated staff user: {user.get('username')}", get_jwt_identity(),
-                         new_data={"is_active": 0})
+        create_audit_log(
+            action="USER_DEACTIVATED",
+            entity_type="USER",
+            entity_id=str(user_id),
+            description=f"Deactivated staff user: {user['username']}.",
+            old_data=user,
+            new_data={
+                "is_active": 0
+            },
+            connection=connection
+        )
         # Saves the changes.
         connection.commit()
 
@@ -863,6 +994,17 @@ def change_password():
             new_password_hash,
             user_id
         ))
+        
+        create_audit_log(
+            action="USER_PASSWORD_CHANGED",
+            entity_type="USER",
+            entity_id=str(user_id),
+            description="User changed their password.",
+            new_data={
+                "password_changed": True
+            },
+            connection=connection
+        )
 
         # Saves the new password.
         connection.commit()
@@ -1058,6 +1200,22 @@ def admin_create_user():
 
         user_id = cursor.lastrowid
 
+        create_audit_log(
+            action="USER_ADDED",
+            entity_type="USER",
+            entity_id=str(user_id),
+            description=f"Admin created {role} account: {username}.",
+            new_data={
+                "user_id": user_id,
+                "full_name": full_name,
+                "username": username,
+                "email": email,
+                "role": role,
+                "store_id": store_id
+            },
+            connection=connection
+        )
+
         connection.commit()
 
         return jsonify({
@@ -1120,7 +1278,14 @@ def admin_update_user_status(user_id):
 
         # Check whether the user exists.
         cursor.execute("""
-            SELECT user_id, username, role
+            SELECT
+                user_id,
+                username,
+                full_name,
+                email,
+                role,
+                is_active,
+                store_id
             FROM users
             WHERE user_id = %s
         """, (user_id,))
@@ -1146,6 +1311,21 @@ def admin_update_user_status(user_id):
             is_active,
             user_id
         ))
+        
+        create_audit_log(
+            action="USER_ACTIVATED" if is_active else "USER_DEACTIVATED",
+            entity_type="USER",
+            entity_id=str(user_id),
+            description=(
+                f"Admin {'activated' if is_active else 'deactivated'} "
+                f"user: {user['username']}."
+            ),
+            old_data=user,
+            new_data={
+                "is_active": int(is_active)
+            },
+            connection=connection
+        )
 
         connection.commit()
 

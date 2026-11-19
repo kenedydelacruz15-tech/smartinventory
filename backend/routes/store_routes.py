@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt
 from backend.database import get_db_connection
+from backend.audit_logger import create_audit_log
 
 # Store API routes
 store_bp = Blueprint("store_bp", __name__)
@@ -135,12 +136,21 @@ def create_store():
         db.commit()
 
         store_id = cursor.lastrowid
-        try:
-            from backend.audit_logger import create_audit_log
-            create_audit_log(store_id, "STORE_CREATED", "STORE", store_id, f"Created store: {store_name}", int(get_jwt().get("user_id") or 0) or None, new_data={"store_name": store_name, "store_address": store_address, "store_contact": store_contact})
-        except Exception as audit_error:
-            print("STORE CREATE AUDIT ERROR:", audit_error)
 
+        create_audit_log(
+            action="STORE_CREATED",
+            entity_type="STORE",
+            entity_id=str(store_id),
+            description=f"Created store: {store_name}.",
+            new_data={
+                "store_name": store_name,
+                "store_address": store_address,
+                "store_contact": store_contact
+            },
+            connection=db
+        )
+
+        db.commit()
         return jsonify({
             "message": "Store created successfully.",
             "store_id": store_id
@@ -187,7 +197,11 @@ def update_store(store_id):
         # Check store exists
         cursor.execute(
             """
-            SELECT store_id
+            SELECT
+                store_id,
+                store_name,
+                store_address,
+                store_contact
             FROM stores
             WHERE store_id = %s
             """,
@@ -238,6 +252,20 @@ def update_store(store_id):
                 store_contact,
                 store_id
             )
+        )
+
+        create_audit_log(
+            action="STORE_UPDATED",
+            entity_type="STORE",
+            entity_id=str(store_id),
+            description=f"Updated store: {store_name}.",
+            old_data=store,
+            new_data={
+                "store_name": store_name,
+                "store_address": store_address,
+                "store_contact": store_contact
+            },
+            connection=db
         )
 
         db.commit()
@@ -356,19 +384,36 @@ def update_store_profile():
     try:
         cursor.execute(
             """
-            UPDATE stores
-            SET
-                store_name = %s,
-                store_address = %s,
-                store_contact = %s
+            SELECT
+                store_id,
+                store_name,
+                store_address,
+                store_contact
+            FROM stores
             WHERE store_id = %s
             """,
-            (
-                store_name,
-                address,
-                contact_number,
-                store_id
-            )
+            (store_id,)
+        )
+
+        old_store = cursor.fetchone()
+
+        if not old_store:
+            return jsonify({
+                "error": "Store not found."
+            }), 404
+
+        create_audit_log(
+            action="STORE_PROFILE_UPDATED",
+            entity_type="STORE",
+            entity_id=str(store_id),
+            description=f"Updated store profile: {store_name}.",
+            old_data=old_store,
+            new_data={
+                "store_name": store_name,
+                "store_address": address,
+                "store_contact": contact_number
+            },
+            connection=db
         )
 
         db.commit()
@@ -470,8 +515,17 @@ def permanently_delete_store(store_id):
         occupied = [name for name, count in counts.items() if count]
         if occupied:
             return jsonify({"error": "This store still contains " + ", ".join(occupied) + ". Remove or reassign those records first."}), 409
-        from backend.audit_logger import create_audit_log
-        create_audit_log(store_id, "STORE_PERMANENTLY_DELETED", "STORE", store_id, f"Permanently deleted store: {store['store_name']}", int(get_jwt().get("user_id") or 0) or None, old_data=store)
+        create_audit_log(
+            action="STORE_PERMANENTLY_DELETED",
+            entity_type="STORE",
+            entity_id=str(store_id),
+            description=f"Permanently deleted store: {store['store_name']}.",
+            old_data=store,
+            new_data={
+                "deleted": True
+            },
+            connection=db
+        )
         cursor.execute("DELETE FROM stores WHERE store_id=%s", (store_id,))
         db.commit()
         return jsonify({"message": "Store permanently deleted."}), 200

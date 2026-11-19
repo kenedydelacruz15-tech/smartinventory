@@ -19,6 +19,21 @@ const emptyForm = {
   image_url: "",
 };
 
+const getImageUrl = (imageUrl) => {
+  if (!imageUrl) return "";
+
+  if (
+    imageUrl.startsWith("http://") ||
+    imageUrl.startsWith("https://") ||
+    imageUrl.startsWith("blob:")
+  ) {
+    return imageUrl;
+  }
+
+  const baseURL = api.defaults.baseURL.replace(/\/$/, "");
+  return `${baseURL}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+};
+
 const isProductFieldInvalid = (field, value) => {
   if (field === "product_name" || field === "sku") {
     return !String(value || "").trim();
@@ -56,6 +71,8 @@ export default function Products() {
   const [categories, setCategories] = useState([]);
 
   const [form, setForm] = useState(emptyForm);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState("");
   const [validationErrors, setValidationErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -72,20 +89,6 @@ export default function Products() {
   const [duplicateProduct, setDuplicateProduct] = useState(null);
   const [duplicateOverride, setDuplicateOverride] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
-
-  // Product compatibility
-  const [compatibilityOpen, setCompatibilityOpen] = useState(false);
-  const [compatibilityProduct, setCompatibilityProduct] = useState(null);
-  const [compatibilities, setCompatibilities] = useState([]);
-  const [compatibilityBrands, setCompatibilityBrands] = useState([]);
-  const [compatibilityModels, setCompatibilityModels] = useState([]);
-  const [selectedCompatibilityBrand, setSelectedCompatibilityBrand] = useState("");
-  const [selectedCompatibilityModel, setSelectedCompatibilityModel] = useState("");
-  const [compatibilityLoading, setCompatibilityLoading] = useState(false);
-  const [compatibilityError, setCompatibilityError] = useState("");
-  const [newCompatibilityBrand, setNewCompatibilityBrand] = useState("");
-  const [newCompatibilityModel, setNewCompatibilityModel] = useState("");
-  const [newCompatibilityYear, setNewCompatibilityYear] = useState("");
 
   // Barcode scanner
   const scannerRef = useRef(null);
@@ -189,6 +192,8 @@ export default function Products() {
   // Reset Form
 
   const resetForm = () => {
+    setImageFile(null);
+    setImagePreview("");
     setForm({ ...emptyForm });
     setValidationErrors({});
     setEditingId(null);
@@ -213,105 +218,80 @@ export default function Products() {
     await loadProducts();
   };
 
-  // Look up barcode using both APIs
-  const handleBarcodeLookup = async (barcodeValue = null) => {
-    const barcode = String(
-      barcodeValue ?? form.barcode ?? ""
-    ).trim();
 
-    if (!barcode) {
-      setError("Please enter or scan a barcode first.");
+
+const handleBarcodeLookup = async (barcodeValue = null) => {
+  const barcode = String(
+    barcodeValue ?? form.barcode ?? ""
+  ).trim();
+
+  if (!barcode) {
+    setError("Please enter or scan a barcode first.");
+    return;
+  }
+
+  try {
+    setBarcodeLoading(true);
+    setError("");
+    setSuccess("");
+    setLookupResult(null);
+    setDuplicateProduct(null);
+    setDuplicateOverride(false);
+
+    // Search local MySQL database
+    const res = await api.get(
+      `/api/products/barcode/${encodeURIComponent(barcode)}`
+    );
+
+    const product = res.data.product;
+
+    if (!res.data.found || !product) {
+      setError("Product not found in your local database.");
       return;
     }
 
-    if (!/^\d+$/.test(barcode)) {
-      setError("Barcode must contain numbers only.");
-      return;
-    }
+    setLookupResult({
+      ...product,
+      found: true,
+      ean: product.barcode,
+      image: product.image_url,
+      images: product.image_url ? [product.image_url] : [],
+      specifications: {}
+    });
 
-    try {
-      setBarcodeLoading(true);
-      setError("");
-      setSuccess("");
-      setLookupResult(null);
-      setDuplicateProduct(null);
-      setDuplicateOverride(false);
+    setDuplicateProduct(product);
 
-      const res = await api.get(
-        `/api/products/autoparts/barcode/${encodeURIComponent(
-          barcode
-        )}`
-      );
+    setForm((prev) => ({
+      ...prev,
+      product_name: product.product_name || "",
+      sku: product.sku || "",
+      part_number: product.part_number || "",
+      brand: product.brand || "",
+      product_type: product.product_type || "",
+      barcode: product.barcode || barcode,
+      category_id: String(product.category_id || ""),
+      selling_price: product.selling_price ?? "",
+      reorder_level: product.reorder_level ?? "",
+      description: product.description || "",
+      image_url: product.image_url || ""
+    }));
 
-      const data = res.data;
+    setSuccess("Product found in your local database.");
 
-      if (data.duplicate) {
-        setDuplicateProduct(data.duplicate);
-      }
+  } catch (err) {
+    console.error("Local barcode lookup error:", err);
 
-      if (!data.found) {
-        setLookupResult(data);
-        setError(
-          data.message ||
-            "No product was found in either API."
-        );
-        return;
-      }
+    setError(
+      err.response?.status === 404
+        ? "Product not found in your local database."
+        : err.response?.data?.error ||
+          "Failed to search local products."
+    );
+  } finally {
+    setBarcodeLoading(false);
+  }
+};
 
-      setLookupResult(data);
-
-      setForm((prev) => ({
-        ...prev,
-
-        barcode:
-          data.ean || barcode,
-
-        product_name:
-          data.product_name ||
-          prev.product_name,
-
-        part_number:
-          data.part_number ||
-          prev.part_number,
-
-        brand:
-          data.brand ||
-          prev.brand,
-
-        description:
-          data.description ||
-          prev.description
-      }));
-      if (data.product_name) {
-        setValidationErrors((prev) => (
-          Object.prototype.hasOwnProperty.call(prev, "product_name")
-            ? {
-                ...prev,
-                product_name: isProductFieldInvalid("product_name", data.product_name),
-              }
-            : prev
-        ));
-      }
-
-      setSuccess(
-        data.message ||
-          "Product information found. Review the fields before saving."
-      );
-    } catch (err) {
-      console.error(
-        "Dual API barcode lookup error:",
-        err
-      );
-
-      setError(
-        err.response?.data?.error ||
-          err.response?.data?.message ||
-          "Failed to look up barcode."
-      );
-    } finally {
-      setBarcodeLoading(false);
-    }
-  };
 
   // Start Barcode Scanner
 
@@ -462,6 +442,7 @@ export default function Products() {
       selling_price: isProductFieldInvalid("selling_price", form.selling_price),
       reorder_level: isProductFieldInvalid("reorder_level", form.reorder_level),
     };
+
     setValidationErrors(nextValidationErrors);
 
     if (Object.values(nextValidationErrors).some(Boolean)) {
@@ -476,44 +457,43 @@ export default function Products() {
       return;
     }
 
-    const productData = {
-      product_name:
-        form.product_name.trim(),
-
-      sku:
-        form.sku.trim(),
-
-      barcode:
-        form.barcode.trim() || null,
-
-      part_number:
-        form.part_number.trim() || null,
-
-      product_type:
-        form.product_type.trim() || null,
-
-      brand:
-        form.brand.trim() || null,
-
-      category_id:
-        Number(form.category_id),
-
-      selling_price:
-        Number(form.selling_price),
-
-      reorder_level:
-        Number(form.reorder_level),
-
-      description:
-        form.description.trim() || null,
-
-      image_url:
-        lookupResult?.image || form.image_url || null,
-    };
-
     try {
       setLoading(true);
       setLastCreatedProduct(null);
+
+      let uploadedImageUrl = form.image_url || null;
+
+      // Upload selected image to the local backend
+      if (imageFile) {
+        const imageData = new FormData();
+        imageData.append("image", imageFile);
+
+        const imageResponse = await api.post(
+          "/api/products/upload-image",
+          imageData,
+          {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+          }
+        );
+
+        uploadedImageUrl = imageResponse.data.image_url;
+      }
+
+      const productData = {
+        product_name: form.product_name.trim(),
+        sku: form.sku.trim(),
+        barcode: form.barcode.trim() || null,
+        part_number: form.part_number.trim() || null,
+        product_type: form.product_type.trim() || null,
+        brand: form.brand.trim() || null,
+        category_id: Number(form.category_id),
+        selling_price: Number(form.selling_price),
+        reorder_level: Number(form.reorder_level),
+        description: form.description.trim() || null,
+        image_url: uploadedImageUrl,
+      };
 
       if (editingId !== null) {
         await api.put(
@@ -521,9 +501,7 @@ export default function Products() {
           productData
         );
 
-        setSuccess(
-          "Product updated successfully."
-        );
+        setSuccess("Product updated successfully.");
       } else {
         const res = await api.post(
           "/api/products/",
@@ -534,28 +512,28 @@ export default function Products() {
           ...productData,
           product_id: res.data.product_id,
         });
-        setSuccess(
-          "Product added successfully."
-        );
+
+        setSuccess("Product added successfully.");
       }
 
       if (scannerRef.current) await stopScanner();
+
       setForm({ ...emptyForm });
+      setImageFile(null);
+      setImagePreview("");
       setValidationErrors({});
       setEditingId(null);
       setFormOpen(false);
 
       await loadProducts();
+
     } catch (err) {
-      console.error(
-        "Save product error:",
-        err
-      );
+      console.error("Save product error:", err);
 
       setError(
         err.response?.data?.error ||
-          err.response?.data?.message ||
-          "Failed to save product."
+        err.response?.data?.message ||
+        "Failed to save product."
       );
     } finally {
       setLoading(false);
@@ -706,6 +684,9 @@ export default function Products() {
         product.image_url || "",
     });
 
+    setImageFile(null);
+    setImagePreview("");
+
     setError("");
     setSuccess("");
 
@@ -798,204 +779,6 @@ export default function Products() {
           "Failed to restore product."
       );
     }
-  };
-
-  // Load compatibility brands
-  const loadCompatibilityBrands = async () => {
-    try {
-      const res = await api.get("/api/products/compatibility/brands");
-      setCompatibilityBrands(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to load vehicle brands."
-      );
-    }
-  };
-
-  // Load compatibility models
-  const loadCompatibilityModels = async (brandId) => {
-    if (!brandId) {
-      setCompatibilityModels([]);
-      return;
-    }
-    try {
-      const res = await api.get("/api/products/compatibility/models", {
-        params: { brand_id: brandId },
-      });
-      setCompatibilityModels(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to load vehicle models."
-      );
-    }
-  };
-
-  // Open compatibility manager
-  const openCompatibility = async (product) => {
-    try {
-      setCompatibilityProduct(product);
-      setCompatibilityOpen(true);
-      setCompatibilityLoading(true);
-      setCompatibilityError("");
-      setSelectedCompatibilityBrand("");
-      setSelectedCompatibilityModel("");
-      setCompatibilityModels([]);
-      await loadCompatibilityBrands();
-
-      // Automatically import motorcycle compatibility from the product part number.
-      try {
-        const autoRes = await api.post(
-          `/api/products/${product.product_id}/compatibility/auto`
-        );
-        if (autoRes.data?.message) {
-          setCompatibilityError(autoRes.data.message);
-        }
-      } catch (autoErr) {
-        setCompatibilityError(
-          autoErr.response?.data?.error ||
-            "Automatic vehicle compatibility could not be loaded."
-        );
-      }
-
-      const res = await api.get(
-        `/api/products/${product.product_id}/compatibility`
-      );
-      setCompatibilities(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to load compatibility."
-      );
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  // Add compatibility to product
-  const addCompatibility = async () => {
-    if (!compatibilityProduct || !selectedCompatibilityModel) {
-      setCompatibilityError("Please select a vehicle model.");
-      return;
-    }
-    try {
-      setCompatibilityLoading(true);
-      setCompatibilityError("");
-      await api.post(
-        `/api/products/${compatibilityProduct.product_id}/compatibility`,
-        { model_id: Number(selectedCompatibilityModel) }
-      );
-      const res = await api.get(
-        `/api/products/${compatibilityProduct.product_id}/compatibility`
-      );
-      setCompatibilities(Array.isArray(res.data) ? res.data : []);
-      setSelectedCompatibilityModel("");
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to add compatibility."
-      );
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  // Remove compatibility
-  const removeCompatibility = async (item) => {
-    if (!compatibilityProduct) return;
-    const confirmed = window.confirm(
-      `Remove ${item.brand_name} ${item.model_name}${item.model_year ? ` (${item.model_year})` : ""} from this product?`
-    );
-    if (!confirmed) return;
-    try {
-      setCompatibilityLoading(true);
-      setCompatibilityError("");
-      await api.delete(
-        `/api/products/${compatibilityProduct.product_id}/compatibility/${item.compatibility_id}`
-      );
-      setCompatibilities((prev) =>
-        prev.filter((row) => row.compatibility_id !== item.compatibility_id)
-      );
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to remove compatibility."
-      );
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  // Create a vehicle brand
-  const addCompatibilityBrand = async () => {
-    const name = newCompatibilityBrand.trim();
-    if (!name) {
-      setCompatibilityError("Enter a vehicle brand name.");
-      return;
-    }
-    try {
-      setCompatibilityLoading(true);
-      setCompatibilityError("");
-      const res = await api.post("/api/products/compatibility/brands", {
-        brand_name: name,
-      });
-      await loadCompatibilityBrands();
-      const brandId = res.data.brand_id || res.data.brand?.brand_id;
-      if (brandId) {
-        setSelectedCompatibilityBrand(String(brandId));
-        await loadCompatibilityModels(brandId);
-      }
-      setNewCompatibilityBrand("");
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to create vehicle brand."
-      );
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  // Create a vehicle model
-  const addCompatibilityModel = async () => {
-    if (!selectedCompatibilityBrand) {
-      setCompatibilityError("Select a vehicle brand first.");
-      return;
-    }
-    const name = newCompatibilityModel.trim();
-    if (!name) {
-      setCompatibilityError("Enter a vehicle model name.");
-      return;
-    }
-    try {
-      setCompatibilityLoading(true);
-      setCompatibilityError("");
-      const res = await api.post("/api/products/compatibility/models", {
-        brand_id: Number(selectedCompatibilityBrand),
-        model_name: name,
-        model_year: newCompatibilityYear.trim() || null,
-      });
-      await loadCompatibilityModels(selectedCompatibilityBrand);
-      const modelId = res.data.model_id || res.data.model?.model_id;
-      if (modelId) setSelectedCompatibilityModel(String(modelId));
-      setNewCompatibilityModel("");
-      setNewCompatibilityYear("");
-    } catch (err) {
-      setCompatibilityError(
-        err.response?.data?.error || "Failed to create vehicle model."
-      );
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  // Close compatibility manager
-  const closeCompatibility = () => {
-    setCompatibilityOpen(false);
-    setCompatibilityProduct(null);
-    setCompatibilities([]);
-    setCompatibilityModels([]);
-    setSelectedCompatibilityBrand("");
-    setSelectedCompatibilityModel("");
-    setCompatibilityError("");
-    setNewCompatibilityBrand("");
-    setNewCompatibilityModel("");
-    setNewCompatibilityYear("");
   };
 
   // Category Name
@@ -1266,7 +1049,7 @@ export default function Products() {
                     }}
                   >
                     <img
-                      src={image}
+                      src={getImageUrl(previewImage)}
                       alt={lookupResult.product_name || "Product"}
                       style={{
                         width: "100%",
@@ -1346,11 +1129,11 @@ export default function Products() {
                 cursor: "pointer",
               }}
             >
-              ×
+              
             </button>
 
             <img
-              src={previewImage}
+              src={getImageUrl(previewImage)}
               alt={lookupResult?.product_name || "Product preview"}
               onClick={(event) => event.stopPropagation()}
               style={{
@@ -1614,6 +1397,68 @@ export default function Products() {
 
           {/* DESCRIPTION */}
 
+          {/* PRODUCT IMAGE */}
+
+          <div className="form-field full-width">
+            <label htmlFor="product-image">Product Image</label>
+
+            <input
+              id="product-image"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={loading || barcodeLoading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+
+                if (!file) return;
+
+                if (file.size > 5 * 1024 * 1024) {
+                  setError("Image must not exceed 5 MB.");
+                  e.target.value = "";
+                  return;
+                }
+
+                setImageFile(file);
+                setImagePreview(URL.createObjectURL(file));
+                setError("");
+              }}
+            />
+
+            {(imagePreview || form.image_url) && (
+              <div style={{ marginTop: "12px" }}>
+                <img
+                  src={imagePreview || form.image_url}
+                  alt="Product preview"
+                  style={{
+                    width: "140px",
+                    height: "140px",
+                    objectFit: "contain",
+                    border: "1px solid #ddd",
+                    borderRadius: "8px",
+                    padding: "5px",
+                    background: "#fff"
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setImageFile(null);
+                    setImagePreview("");
+                    setForm((prev) => ({
+                      ...prev,
+                      image_url: ""
+                    }));
+                  }}
+                  style={{ display: "block", marginTop: "8px" }}
+                >
+                  Remove Image
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="form-field full-width">
             <label>Description</label>
 
@@ -1825,7 +1670,7 @@ export default function Products() {
                             title="Preview product image"
                           >
                             <img
-                              src={product.image_url}
+                              src={getImageUrl(product.image_url)}
                               alt={product.product_name || "Product"}
                               style={{
                                 width: "48px",
@@ -1957,8 +1802,6 @@ export default function Products() {
                           QR PDF
                         </button>
 
-                        {/* Status and vehicle compatibility are managed in Inventory. */}
-
                         {/* Activate/deactivate actions are managed in Inventory. */}
 
                       </div>
@@ -1973,224 +1816,9 @@ export default function Products() {
 
           </table>
         )}
-
       </div>
-
-      {/* PRODUCT COMPATIBILITY MODAL */}
-      {compatibilityOpen && compatibilityProduct && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: "20px",
-          }}
-          onClick={closeCompatibility}
-        >
-          <div
-            style={{
-              background: "#fff",
-              width: "100%",
-              maxWidth: "900px",
-              maxHeight: "90vh",
-              overflowY: "auto",
-              borderRadius: "12px",
-              padding: "24px",
-              boxSizing: "border-box",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "15px" }}>
-              <div>
-                <h2 style={{ margin: 0 }}>Product Compatibility</h2>
-                <p style={{ margin: "6px 0 0", color: "#666" }}>
-                  {compatibilityProduct.product_name}
-                  {compatibilityProduct.part_number ? ` • ${compatibilityProduct.part_number}` : ""}
-                </p>
-              </div>
-              <button type="button" className="secondary" onClick={closeCompatibility}>✕ Close</button>
-            </div>
-
-            {compatibilityError && (
-              <div className="alert" style={{ marginTop: "18px" }}>
-                {compatibilityError}
-              </div>
-            )}
-
-            <div style={{ marginTop: "20px", padding: "16px", border: "1px solid #ddd", borderRadius: "10px" }}>
-              <h3 style={{ marginTop: 0 }}>Compatible Vehicles</h3>
-              <p style={{ marginTop: 0, color: "#666" }}>
-                Vehicle applications are automatically retrieved when the product has a part number. You can still add a vehicle manually below if needed.
-              </p>
-
-              <h4 style={{ marginBottom: "10px" }}>Add Manually</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "10px", alignItems: "end" }}>
-                <div className="form-field">
-                  <label>Vehicle Brand</label>
-                  <select
-                    value={selectedCompatibilityBrand}
-                    onChange={async (e) => {
-                      const value = e.target.value;
-                      setSelectedCompatibilityBrand(value);
-                      setSelectedCompatibilityModel("");
-                      await loadCompatibilityModels(value);
-                    }}
-                    disabled={compatibilityLoading}
-                  >
-                    <option value="">Select brand</option>
-                    {compatibilityBrands.map((brand) => (
-                      <option key={brand.brand_id} value={brand.brand_id}>
-                        {brand.brand_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-field">
-                  <label>Vehicle Model / Year</label>
-                  <select
-                    value={selectedCompatibilityModel}
-                    onChange={(e) => setSelectedCompatibilityModel(e.target.value)}
-                    disabled={compatibilityLoading || !selectedCompatibilityBrand}
-                  >
-                    <option value="">Select model</option>
-                    {compatibilityModels.map((model) => (
-                      <option key={model.model_id} value={model.model_id}>
-                        {model.model_name}{model.model_year ? ` (${model.model_year})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={addCompatibility}
-                  disabled={compatibilityLoading || !selectedCompatibilityModel}
-                >
-                  + Add
-                </button>
-              </div>
-            </div>
-
-            <div style={{ marginTop: "20px" }}>
-              <h3>Saved Compatible Vehicles</h3>
-              {compatibilityLoading && compatibilities.length === 0 ? (
-                <p>Loading compatibility...</p>
-              ) : compatibilities.length === 0 ? (
-                <div className="empty-state" style={{ padding: "25px 10px" }}>
-                  <p>No compatible vehicles have been assigned yet.</p>
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: "8px" }}>
-                  {compatibilities.map((item) => (
-                    <div
-                      key={item.compatibility_id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "15px",
-                        padding: "12px 14px",
-                        border: "1px solid #e2e2e2",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      <div>
-                        <strong>{item.brand_name} {item.model_name}</strong>
-                        {item.model_year && (
-                          <div style={{ color: "#666", marginTop: "3px" }}>
-                            Model year: {item.model_year}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        className="action-button deactivate-button"
-                        onClick={() => removeCompatibility(item)}
-                        disabled={compatibilityLoading}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ marginTop: "24px", padding: "16px", border: "1px solid #ddd", borderRadius: "10px" }}>
-              <h3 style={{ marginTop: 0 }}>Add Vehicle Brand</h3>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <input
-                  type="text"
-                  placeholder="Example: Honda"
-                  value={newCompatibilityBrand}
-                  onChange={(e) => setNewCompatibilityBrand(e.target.value)}
-                  disabled={compatibilityLoading}
-                  style={{ flex: 1 }}
-                />
-                <button type="button" className="secondary" onClick={addCompatibilityBrand} disabled={compatibilityLoading}>
-                  + Add Brand
-                </button>
-              </div>
-            </div>
-
-            <div style={{ marginTop: "16px", padding: "16px", border: "1px solid #ddd", borderRadius: "10px" }}>
-              <h3 style={{ marginTop: 0 }}>Add Vehicle Model</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "10px", alignItems: "end" }}>
-                <div className="form-field">
-                  <label>Brand</label>
-                  <select
-                    value={selectedCompatibilityBrand}
-                    onChange={async (e) => {
-                      const value = e.target.value;
-                      setSelectedCompatibilityBrand(value);
-                      setSelectedCompatibilityModel("");
-                      await loadCompatibilityModels(value);
-                    }}
-                    disabled={compatibilityLoading}
-                  >
-                    <option value="">Select brand</option>
-                    {compatibilityBrands.map((brand) => (
-                      <option key={brand.brand_id} value={brand.brand_id}>
-                        {brand.brand_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-field">
-                  <label>Model</label>
-                  <input
-                    type="text"
-                    placeholder="Example: Click 125i"
-                    value={newCompatibilityModel}
-                    onChange={(e) => setNewCompatibilityModel(e.target.value)}
-                    disabled={compatibilityLoading}
-                  />
-                </div>
-                <div className="form-field">
-                  <label>Year / Range</label>
-                  <input
-                    type="text"
-                    placeholder="Example: 2020-2024"
-                    value={newCompatibilityYear}
-                    onChange={(e) => setNewCompatibilityYear(e.target.value)}
-                    disabled={compatibilityLoading}
-                  />
-                </div>
-                <button type="button" className="secondary" onClick={addCompatibilityModel} disabled={compatibilityLoading}>
-                  + Add Model
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
+
+    
   );
 }

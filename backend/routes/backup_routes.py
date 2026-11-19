@@ -2,7 +2,7 @@ import json
 import decimal
 from datetime import datetime, date
 from flask import Blueprint, jsonify, Response
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt
 from backend.database import get_db_connection 
 
 # Define a distinct blueprint for backups
@@ -11,7 +11,13 @@ backup_bp = Blueprint("backup", __name__, url_prefix="/backup")
 @backup_bp.route("/export", methods=["GET"])
 @jwt_required()
 def export_tenant_data():
-    current_store_id = get_jwt_identity()
+    claims = get_jwt()
+    current_store_id = claims.get("store_id")
+
+    if not current_store_id:
+        return jsonify({
+            "error": "No store is associated with this account."
+        }), 403
     
     db = get_db_connection()
     cursor = db.cursor(dictionary=True)

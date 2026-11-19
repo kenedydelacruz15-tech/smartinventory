@@ -1,17 +1,9 @@
 import os
 from datetime import timedelta
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from dotenv import load_dotenv
-
-load_dotenv()
-
-api_key = os.getenv("AUTOPARTS_API_KEY")
-
-print("AutoPartsAPI key loaded:", bool(api_key))
-print("AutoPartsAPI key length:", len(api_key) if api_key else 0)
 
 from backend.routes.category_routes import category_bp
 from backend.routes.product_routes import product_bp
@@ -31,6 +23,20 @@ from backend.routes.store_routes import store_bp
 from backend.routes.audit_routes import audit_bp
 
 app = Flask(__name__)
+
+# Local product image storage
+app.config["PRODUCT_UPLOAD_FOLDER"] = os.path.join(
+    app.root_path,
+    "uploads",
+    "products"
+)
+
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
+
+os.makedirs(
+    app.config["PRODUCT_UPLOAD_FOLDER"],
+    exist_ok=True
+)
 
 # Change this origin when the Vite frontend is hosted at a different address.
 CORS(app,
@@ -90,6 +96,15 @@ def home():
     return jsonify({
         "message": "Smart Motorcycle Parts Inventory API is running!"
     })
+
+
+# SERVE LOCAL PRODUCT IMAGES
+@app.route("/uploads/products/<path:filename>")
+def serve_product_image(filename):
+    return send_from_directory(
+        app.config["PRODUCT_UPLOAD_FOLDER"],
+        filename
+    )
 
 
 if __name__ == "__main__":

@@ -15,7 +15,6 @@ const ACTION_LABELS = {
   USER_ADDED: "Add", USER_CREATED: "Add", USER_EDITED: "Edit", USER_UPDATED: "Edit",
   USER_ACTIVATED: "Activate", USER_DEACTIVATED: "Deactivate", USER_PERMANENTLY_DELETED: "Delete",
   USER_LOGIN: "Login", USER_LOGOUT: "Logout",
-  COMPATIBILITY_ADDED: "Compatibility Add", COMPATIBILITY_REMOVED: "Compatibility Remove",
   STORE_CREATED: "Add", STORE_PERMANENTLY_DELETED: "Delete",
 };
 const pretty = (value) => String(value || "—").replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());

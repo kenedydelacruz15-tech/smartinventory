@@ -29,14 +29,24 @@ const formatMovementReason = (reason) =>
         .join(" ")
     : "Unspecified";
 
+
 function ProductThumbnail({ item }) {
-  const imageUrl =
+  const imagePath =
     item.product_image_url ||
     item.image_url ||
     item.product_image ||
     item.image ||
     item.photo_url ||
     item.image_path;
+
+  const imageUrl = imagePath
+    ? imagePath.startsWith("http://") ||
+      imagePath.startsWith("https://")
+      ? imagePath
+      : `${api.defaults.baseURL.replace(/\/$/, "")}${
+          imagePath.startsWith("/") ? "" : "/"
+        }${imagePath}`
+    : "";
 
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -48,29 +58,33 @@ function ProductThumbnail({ item }) {
     <div
       className="inventory-product-thumbnail"
       style={{
-        width: 54,
-        height: 54,
-        flex: "0 0 54px",
-        borderRadius: 10,
+        width: "55px",
+        height: "55px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         overflow: "hidden",
-        display: "grid",
-        placeItems: "center",
-        background: "var(--surface, #f1f5f9)",
-        border: "1px solid var(--line, #e2e8f0)",
+        borderRadius: "8px",
+        background: "#f5f5f5",
       }}
     >
       {imageUrl && !imageFailed ? (
         <img
           src={imageUrl}
           alt={item.product_name || "Product"}
-          loading="lazy"
           onError={() => setImageFailed(true)}
-          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
         />
       ) : (
-        <i className="bi bi-image" aria-label="No product image" style={{ fontSize: 22, color: "var(--muted, #94a3b8)" }} />
+        <i
+          className="bi bi-image"
+          style={{ fontSize: "22px", color: "#999" }}
+        />
       )}
-
     </div>
   );
 }
@@ -104,16 +118,6 @@ export default function Inventory() {
   // Adjust stock modal
   const [editItem, setEditItem] = useState(null);
   const [editQuantity, setEditQuantity] = useState("");
-
-  // Vehicle compatibility is managed from Inventory.
-  const [compatibilityItem, setCompatibilityItem] = useState(null);
-  const [compatibilityList, setCompatibilityList] = useState([]);
-  const [compatibilityBrands, setCompatibilityBrands] = useState([]);
-  const [compatibilityModels, setCompatibilityModels] = useState([]);
-  const [compatibilityBrand, setCompatibilityBrand] = useState("");
-  const [compatibilityModel, setCompatibilityModel] = useState("");
-  const [compatibilityError, setCompatibilityError] = useState("");
-  const [compatibilityLoading, setCompatibilityLoading] = useState(false);
 
   // Load inventory
   const loadInventory = async () => {
@@ -269,19 +273,51 @@ export default function Inventory() {
         await scanner.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 230, height: 230 } },
-          async (decodedText) => {
+          async (decodedText) => { 
             const value = decodedText.trim();
-            const productId = value.match(/^SMARTINVENTORY:PRODUCT:(\d+)$/i)?.[1]
-              || value.match(/^\d+$/)?.[0];
-            if (!productId) {
-              setQrScannerError("This QR code is not a SmartInventory product label.");
-              return;
-            }
-            const item = items.find((entry) => Number(entry.product_id) === Number(productId));
+
+            const productId = value.match(
+              /^SMARTINVENTORY:PRODUCT:(\d+)$/i
+            )?.[1];
+
+            const barcode = productId ? null : value;
+
+            // First search currently loaded inventory
+            let item = items.find((entry) =>
+              productId
+                ? Number(entry.product_id) === Number(productId)
+                : String(entry.barcode || "").trim() === barcode
+            );
+
+            // If not loaded, search local MySQL inventory
             if (!item) {
-              setQrScannerError("No inventory record matches this product QR code.");
+              try {
+                const res = await api.get("/api/inventory/", {
+                  params: {
+                    status: "all",
+                    ...(barcode ? { search: barcode } : {})
+                  }
+                });
+
+                const records = Array.isArray(res.data) ? res.data : [];
+
+                item = records.find((entry) =>
+                  productId
+                    ? Number(entry.product_id) === Number(productId)
+                    : String(entry.barcode || "").trim() === barcode
+                );
+              } catch (err) {
+                console.error("Local inventory search failed:", err);
+              }
+            }
+
+            if (!item) {
+              setQrScannerError(
+                "Product not found in your local inventory."
+              );
               return;
             }
+
             await stopQrScanner();
             openMovement(item, type);
           },
@@ -481,72 +517,6 @@ export default function Inventory() {
     }
   };
 
-  const openCompatibility = async (item) => {
-    setCompatibilityItem(item);
-    setCompatibilityList([]);
-    setCompatibilityBrand("");
-    setCompatibilityModel("");
-    setCompatibilityModels([]);
-    setCompatibilityError("");
-    setCompatibilityLoading(true);
-    try {
-      const [brandsRes, listRes] = await Promise.all([
-        api.get("/api/products/compatibility/brands"),
-        api.get(`/api/products/${item.product_id}/compatibility`),
-      ]);
-      setCompatibilityBrands(Array.isArray(brandsRes.data) ? brandsRes.data : []);
-      setCompatibilityList(Array.isArray(listRes.data) ? listRes.data : []);
-    } catch (err) {
-      setCompatibilityError(err.response?.data?.error || "Could not load vehicle compatibility.");
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  const loadCompatibilityModels = async (brandId) => {
-    setCompatibilityBrand(brandId);
-    setCompatibilityModel("");
-    if (!brandId) { setCompatibilityModels([]); return; }
-    try {
-      const res = await api.get("/api/products/compatibility/models", { params: { brand_id: brandId } });
-      setCompatibilityModels(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      setCompatibilityError(err.response?.data?.error || "Could not load vehicle models.");
-    }
-  };
-
-  const addCompatibility = async () => {
-    if (!compatibilityItem || !compatibilityModel) {
-      setCompatibilityError("Select a vehicle model first.");
-      return;
-    }
-    try {
-      setCompatibilityLoading(true);
-      setCompatibilityError("");
-      await api.post(`/api/products/${compatibilityItem.product_id}/compatibility`, { model_id: Number(compatibilityModel) });
-      const res = await api.get(`/api/products/${compatibilityItem.product_id}/compatibility`);
-      setCompatibilityList(Array.isArray(res.data) ? res.data : []);
-      setCompatibilityModel("");
-    } catch (err) {
-      setCompatibilityError(err.response?.data?.error || "Could not add compatibility.");
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
-  const removeCompatibility = async (entry) => {
-    if (!compatibilityItem || !window.confirm(`Remove ${entry.brand_name} ${entry.model_name} from this product?`)) return;
-    try {
-      setCompatibilityLoading(true);
-      await api.delete(`/api/products/${compatibilityItem.product_id}/compatibility/${entry.compatibility_id}`);
-      setCompatibilityList((current) => current.filter((row) => row.compatibility_id !== entry.compatibility_id));
-    } catch (err) {
-      setCompatibilityError(err.response?.data?.error || "Could not remove compatibility.");
-    } finally {
-      setCompatibilityLoading(false);
-    }
-  };
-
   return (
     <div className="page-container inventory-page">
       <div className="page-header">
@@ -604,7 +574,7 @@ export default function Inventory() {
       <form className="search-bar inventory-search" onSubmit={handleSearch}>
         <input
           type="text"
-          placeholder="Search product, SKU, part number, brand..."
+          placeholder="Search product, SKU, part number, brand, or barcode..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -810,13 +780,11 @@ export default function Inventory() {
                               <button type="button" className="btn-success" onClick={() => openMovement(item, "STOCK_IN")}>Stock In</button>
                               <button type="button" className="btn-warning" onClick={() => openMovement(item, "STOCK_OUT")}>Stock Out</button>
                               <button type="button" className="btn-primary" onClick={() => openEdit(item)}>Adjust</button>
-                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Fitment</button>
                               <button type="button" className="btn-danger" onClick={() => deactivateItem(item)}>Deactivate</button>
                             </>
                           ) : (
                             <>
                               <button type="button" className="btn-primary" onClick={() => restoreItem(item)}>Restore</button>
-                              <button type="button" className="btn-secondary" onClick={() => openCompatibility(item)}>Fitment</button>
                               <button type="button" className="btn-danger" onClick={() => permanentlyDeleteItem(item)}>Delete</button>
                             </>
                           )}
@@ -1028,45 +996,6 @@ export default function Inventory() {
                   : "Save Adjustment"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {compatibilityItem && (
-        <div className="inventory-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCompatibilityItem(null); }}>
-          <div className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-compatibility-title">
-            <div className="modal-header">
-              <div>
-                <h2 id="inventory-compatibility-title">Vehicle Compatibility</h2>
-                <p className="modal-help">{compatibilityItem.product_name}</p>
-              </div>
-              <button type="button" aria-label="Close compatibility" onClick={() => setCompatibilityItem(null)}>×</button>
-            </div>
-            {compatibilityError && <div className="error-message">{compatibilityError}</div>}
-            <div className="form-grid">
-              <label>Vehicle brand
-                <select value={compatibilityBrand} onChange={(e) => loadCompatibilityModels(e.target.value)}>
-                  <option value="">Select brand</option>
-                  {compatibilityBrands.map((brand) => <option key={brand.brand_id} value={brand.brand_id}>{brand.brand_name}</option>)}
-                </select>
-              </label>
-              <label>Vehicle model
-                <select value={compatibilityModel} onChange={(e) => setCompatibilityModel(e.target.value)} disabled={!compatibilityBrand}>
-                  <option value="">Select model</option>
-                  {compatibilityModels.map((model) => <option key={model.model_id} value={model.model_id}>{model.model_name}{model.model_year ? ` (${model.model_year})` : ""}</option>)}
-                </select>
-              </label>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn-secondary" onClick={() => setCompatibilityItem(null)}>Close</button>
-              <button type="button" className="btn-primary" onClick={addCompatibility} disabled={compatibilityLoading || !compatibilityModel}>{compatibilityLoading ? "Saving..." : "Add Compatibility"}</button>
-            </div>
-            <h3>Compatible vehicles</h3>
-            {compatibilityLoading && compatibilityList.length === 0 ? <p className="muted">Loading compatibility...</p> : compatibilityList.length === 0 ? <p className="muted">No compatible vehicles added yet.</p> : (
-              <div className="table-container"><table className="data-table"><thead><tr><th>Brand</th><th>Model</th><th>Year</th><th>Action</th></tr></thead><tbody>
-                {compatibilityList.map((entry) => <tr key={entry.compatibility_id}><td>{entry.brand_name}</td><td>{entry.model_name}</td><td>{entry.model_year || "—"}</td><td><button type="button" className="btn-danger" onClick={() => removeCompatibility(entry)} disabled={compatibilityLoading}>Remove</button></td></tr>)}
-              </tbody></table></div>
-            )}
           </div>
         </div>
       )}

@@ -233,9 +233,20 @@ def create_category():
         ))
 
         category_id = cursor.lastrowid
-        create_audit_log(store_id, "CATEGORY_ADDED", "CATEGORY", category_id,
-                         f"Added category: {category_name}", get_jwt_identity() or None,
-                         new_data={"category_name": category_name, "description": description})
+        create_audit_log(
+            store_id,
+            "CATEGORY_ADDED",
+            "CATEGORY",
+            category_id,
+            f"Added category: {category_name}",
+            get_jwt_identity() or None,
+            new_data={
+                "category_name": category_name,
+                "description": description,
+                "is_active": 1
+            },
+            connection=connection
+        )
         connection.commit()
 
         return jsonify({
@@ -294,10 +305,14 @@ def update_category(category_id):
         cursor = connection.cursor(dictionary=True)
 
         cursor.execute("""
-            SELECT category_id
+            SELECT
+                category_id,
+                category_name,
+                description,
+                is_active
             FROM categories
             WHERE category_id = %s
-              AND store_id = %s
+            AND store_id = %s
         """, (category_id, store_id))
 
         category = cursor.fetchone()
@@ -342,9 +357,21 @@ def update_category(category_id):
             store_id
         ))
 
-        create_audit_log(store_id, "CATEGORY_EDITED", "CATEGORY", category_id,
-                         f"Edited category: {category_name}", get_jwt_identity() or None,
-                         new_data={"category_name": category_name, "description": description})
+        create_audit_log(
+            store_id,
+            "CATEGORY_EDITED",
+            "CATEGORY",
+            category_id,
+            f"Edited category: {category_name}",
+            get_jwt_identity() or None,
+            old_data=category,
+            new_data={
+                "category_name": category_name,
+                "description": description
+            },
+            connection=connection
+        )
+        
         connection.commit()
 
         return jsonify({
@@ -420,9 +447,17 @@ def deactivate_category(category_id):
             store_id
         ))
 
-        create_audit_log(store_id, "CATEGORY_DEACTIVATED", "CATEGORY", category_id,
-                         f"Deactivated category: {category.get('category_name')}", get_jwt_identity() or None,
-                         old_data=category, new_data={"is_active": 0})
+        create_audit_log(
+            store_id,
+            "CATEGORY_DEACTIVATED",
+            "CATEGORY",
+            category_id,
+            f"Deactivated category: {category.get('category_name')}",
+            get_jwt_identity() or None,
+            old_data=category,
+            new_data={"is_active": 0},
+            connection=connection
+        )
         connection.commit()
 
         return jsonify({
@@ -498,9 +533,17 @@ def restore_category(category_id):
             store_id
         ))
 
-        create_audit_log(store_id, "CATEGORY_RESTORED", "CATEGORY", category_id,
-                         f"Restored category: {category.get('category_name')}", get_jwt_identity() or None,
-                         new_data={"is_active": 1})
+        create_audit_log(
+            store_id,
+            "CATEGORY_RESTORED",
+            "CATEGORY",
+            category_id,
+            f"Restored category: {category.get('category_name')}",
+            get_jwt_identity() or None,
+            old_data=category,
+            new_data={"is_active": 1},
+            connection=connection
+        )
         connection.commit()
 
         return jsonify({

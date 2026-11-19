@@ -1,7 +1,8 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from backend.database import get_db_connection
+from backend.audit_logger import create_audit_log
 
 
 # Creates the Blueprint for supplier management.
@@ -321,13 +322,19 @@ def create_supplier():
 
         # Checks for an existing active supplier in the same store.
         cursor.execute("""
-            SELECT supplier_id
+            SELECT
+                supplier_id,
+                supplier_name,
+                contact_person,
+                contact_number,
+                email,
+                address
             FROM suppliers
-            WHERE supplier_name = %s
+            WHERE supplier_id = %s
             AND store_id = %s
             AND deleted_at IS NULL
         """, (
-            supplier_name,
+            supplier_id,
             store_id
         ))
 
@@ -341,7 +348,7 @@ def create_supplier():
         cursor.execute("""
             SELECT supplier_id
             FROM suppliers
-            WHERE supplier_name = %s
+            WHERE supplier_id = %s
             AND store_id = %s
             AND deleted_at IS NOT NULL
         """, (
@@ -388,7 +395,25 @@ def create_supplier():
         # Gets the new supplier ID.
         supplier_id = cursor.lastrowid
 
-        # Saves the supplier.
+        # Records the supplier creation.
+        create_audit_log(
+            store_id,
+            "SUPPLIER_ADDED",
+            "SUPPLIER",
+            supplier_id,
+            f"Added supplier: {supplier_name}",
+            get_jwt_identity() or None,
+            new_data={
+                "supplier_name": supplier_name,
+                "contact_person": contact_person or None,
+                "contact_number": contact_number,
+                "email": email,
+                "address": address
+            },
+            connection=connection
+        )
+
+        # Saves the supplier and audit log together.
         connection.commit()
 
         return jsonify({
@@ -485,8 +510,11 @@ def update_supplier(supplier_id):
             store_id
         ))
 
+        # Gets the existing supplier information.
+        existing_supplier = cursor.fetchone()
+
         # Returns an error when the supplier does not exist.
-        if not cursor.fetchone():
+        if not existing_supplier:
             return jsonify({
                 "error": "Supplier not found."
             }), 404
@@ -539,7 +567,26 @@ def update_supplier(supplier_id):
             store_id
         ))
 
-        # Saves the changes.
+        # Records the supplier update.
+        create_audit_log(
+            store_id,
+            "SUPPLIER_EDITED",
+            "SUPPLIER",
+            supplier_id,
+            f"Edited supplier: {supplier_name}",
+            get_jwt_identity() or None,
+            old_data=existing_supplier,
+            new_data={
+                "supplier_name": supplier_name,
+                "contact_person": contact_person or None,
+                "contact_number": contact_number,
+                "email": email,
+                "address": address
+            },
+            connection=connection
+        )
+
+        # Saves the supplier update and audit log together.
         connection.commit()
 
         return jsonify({
@@ -668,7 +715,14 @@ def delete_supplier(supplier_id):
 
         # Checks whether the supplier belongs to the user's store.
         cursor.execute("""
-            SELECT supplier_id, supplier_name
+            SELECT
+                supplier_id,
+                supplier_name,
+                contact_person,
+                contact_number,
+                email,
+                address,
+                deleted_at
             FROM suppliers
             WHERE supplier_id = %s
             AND store_id = %s
@@ -705,7 +759,22 @@ def delete_supplier(supplier_id):
             store_id
         ))
 
-        # Saves the soft delete.
+        # Records the supplier deletion.
+        create_audit_log(
+            store_id,
+            "SUPPLIER_DELETED",
+            "SUPPLIER",
+            supplier_id,
+            f"Moved supplier to trash: {supplier['supplier_name']}",
+            get_jwt_identity() or None,
+            old_data=supplier,
+            new_data={
+                "deleted": True
+            },
+            connection=connection
+        )
+
+        # Saves the deletion and audit log together.
         connection.commit()
 
         return jsonify({
@@ -769,11 +838,18 @@ def restore_supplier(supplier_id):
 
         # Finds the deleted supplier in the user's store.
         cursor.execute("""
-            SELECT supplier_id, supplier_name
+            SELECT
+                supplier_id,
+                supplier_name,
+                contact_person,
+                contact_number,
+                email,
+                address,
+                deleted_at
             FROM suppliers
             WHERE supplier_id = %s
             AND store_id = %s
-            AND deleted_at IS NOT NULL
+            AND deleted_at IS NULL
         """, (
             supplier_id,
             store_id
@@ -824,12 +900,25 @@ def restore_supplier(supplier_id):
             store_id
         ))
 
-        # Saves the restoration.
-        connection.commit()
+        # Records the supplier restoration.
+        create_audit_log(
+            store_id,
+            "SUPPLIER_RESTORED",
+            "SUPPLIER",
+            supplier_id,
+            f"Restored supplier: {supplier['supplier_name']}",
+            get_jwt_identity() or None,
+            old_data={
+                "deleted": True
+            },
+            new_data={
+                "deleted": False
+            },
+            connection=connection
+        )
 
-        return jsonify({
-            "message": "Supplier restored successfully."
-        }), 200
+        # Saves the restoration and audit log together.
+        connection.commit()
 
     except Exception as e:
 
@@ -886,11 +975,18 @@ def permanently_delete_supplier(supplier_id):
 
         # Finds the deleted supplier in the user's store.
         cursor.execute("""
-            SELECT supplier_id, supplier_name
+            SELECT
+                supplier_id,
+                supplier_name,
+                contact_person,
+                contact_number,
+                email,
+                address,
+                deleted_at
             FROM suppliers
             WHERE supplier_id = %s
             AND store_id = %s
-            AND deleted_at IS NOT NULL
+            AND deleted_at IS NULL
         """, (
             supplier_id,
             store_id
@@ -958,12 +1054,21 @@ def permanently_delete_supplier(supplier_id):
             store_id
         ))
 
-        # Saves the permanent deletion.
-        connection.commit()
+        # Records the permanent supplier deletion.
+        create_audit_log(
+            store_id,
+            "SUPPLIER_PERMANENTLY_DELETED",
+            "SUPPLIER",
+            supplier_id,
+            f"Permanently deleted supplier: {supplier['supplier_name']}",
+            get_jwt_identity() or None,
+            old_data=supplier,
+            new_data=None,
+            connection=connection
+        )
 
-        return jsonify({
-            "message": "Supplier permanently deleted successfully."
-        }), 200
+        # Saves the deletion and audit log together.
+        connection.commit()
 
     except Exception as e:
 

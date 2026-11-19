@@ -1,16 +1,16 @@
 """Detailed audit logging helper for SmartInventory."""
 import json
-from threading import Lock
-
 from flask_jwt_extended import get_jwt
 from backend.database import get_db_connection
+
+
+from threading import Lock
 
 _audit_schema_lock = Lock()
 _audit_schema_ready = False
 
 
 def ensure_audit_logs_table(connection):
-    """Create the audit table on existing databases that predate audit logging."""
     global _audit_schema_ready
 
     if _audit_schema_ready:
@@ -21,6 +21,7 @@ def ensure_audit_logs_table(connection):
             return
 
         cursor = connection.cursor()
+
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -41,10 +42,13 @@ def ensure_audit_logs_table(connection):
                     INDEX idx_audit_logs_action_created (action, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+
             connection.commit()
             _audit_schema_ready = True
+
         finally:
             cursor.close()
+
 
 
 def _json_payload(old_data=None, new_data=None):
@@ -67,66 +71,138 @@ def _event_category(action, entity_type=None):
 
 
 def create_audit_log(store_id, action, entity_type, entity_id=None, description=None,
-                     user_id=None, old_data=None, new_data=None):
-    """Write an audit event without breaking the main business operation if logging fails."""
-    connection = cursor = actor_cursor = None
+                     user_id=None, old_data=None, new_data=None,
+                     connection=None):
+
+    own_connection = connection is None
+    cursor = actor_cursor = None
+
     try:
-        connection = get_db_connection()
-        ensure_audit_logs_table(connection)
+        if own_connection:
+            connection = get_db_connection()
+            ensure_audit_logs_table(connection)
+
         actor_name = None
         actor_role = None
+
         if user_id is not None:
             try:
                 actor_cursor = connection.cursor(dictionary=True)
                 actor_cursor.execute(
-                    "SELECT username, full_name, role FROM users WHERE user_id = %s LIMIT 1",
-                    (user_id,),
+                    """
+                    SELECT username, full_name, role
+                    FROM users
+                    WHERE user_id = %s
+                    LIMIT 1
+                    """,
+                    (user_id,)
                 )
+
                 actor = actor_cursor.fetchone()
+
                 if actor:
-                    actor_role = str(actor.get("role") or "").upper()
-                    # Owner/staff are identified by username as requested.
-                    actor_name = actor.get("username") if actor_role in ("OWNER", "STAFF") else (actor.get("full_name") or actor.get("username"))
+                    actor_role = str(
+                        actor.get("role") or ""
+                    ).upper()
+
+                    actor_name = (
+                        actor.get("username")
+                        if actor_role in ("OWNER", "STAFF")
+                        else (
+                            actor.get("full_name")
+                            or actor.get("username")
+                        )
+                    )
+
             except Exception as exc:
                 print("AUDIT ACTOR LOOKUP WARNING:", repr(exc))
+
             finally:
                 if actor_cursor:
                     actor_cursor.close()
+                    actor_cursor = None
+
         claims = {}
+
         if user_id is not None and (not actor_name or not actor_role):
             try:
                 claims = get_jwt()
             except RuntimeError:
-                # Successful login audit events are written before a JWT is attached to the request.
                 claims = {}
-        actor_role = actor_role or str(claims.get("role") or "").upper() or None
+
+        actor_role = (
+            actor_role
+            or str(claims.get("role") or "").upper()
+            or None
+        )
+
         if not actor_name and actor_role in ("OWNER", "STAFF"):
             actor_name = claims.get("username")
+
         details = _json_payload(old_data, new_data)
+
         cursor = connection.cursor()
-        cursor.execute("""
+
+        cursor.execute(
+            """
             INSERT INTO audit_logs
-                (actor_user_id, actor_name, actor_role, store_id,
-                 event_category, action, entity_type, entity_id, description, details)
+                (
+                    actor_user_id,
+                    actor_name,
+                    actor_role,
+                    store_id,
+                    event_category,
+                    action,
+                    entity_type,
+                    entity_id,
+                    description,
+                    details
+                )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (user_id, actor_name, actor_role, store_id, _event_category(action, entity_type),
-              action, entity_type, str(entity_id) if entity_id is not None else None,
-              description or str(action), details))
-        connection.commit()
+            """,
+            (
+                user_id,
+                actor_name,
+                actor_role,
+                store_id,
+                _event_category(action, entity_type),
+                action,
+                entity_type,
+                str(entity_id) if entity_id is not None else None,
+                description or str(action),
+                details
+            )
+        )
+
+        if own_connection:
+            connection.commit()
+
         return True
+
     except Exception as exc:
-        if connection:
-            try: connection.rollback()
-            except Exception: pass
+
+        if own_connection and connection:
+            try:
+                connection.rollback()
+            except Exception:
+                pass
+
+        else:
+            raise
+
         print("AUDIT LOG INSERT ERROR:", repr(exc))
         return False
+
     finally:
-        if cursor:
-            try: cursor.close()
-            except Exception: pass
-        if actor_cursor:
-            try: actor_cursor.close()
-            except Exception: pass
-        if connection:
-            try: connection.close()
-            except Exception: pass
+        for active_cursor in (cursor, actor_cursor):
+            if active_cursor:
+                try:
+                    active_cursor.close()
+                except Exception:
+                    pass
+
+        if own_connection and connection:
+            try:
+                connection.close()
+            except Exception:
+                pass

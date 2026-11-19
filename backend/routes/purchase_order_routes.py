@@ -1,8 +1,12 @@
+
 from functools import wraps
+from uuid import uuid4
 
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt, jwt_required
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+
 from backend.database import get_db_connection
+from backend.audit_logger import create_audit_log
 
 
 purchase_order_bp = Blueprint(
@@ -12,21 +16,39 @@ purchase_order_bp = Blueprint(
 )
 
 
+# ---------------------------------------------------------
+# OWNER / STORE ACCESS CHECK
+# ---------------------------------------------------------
+
 def owner_store_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
+
         claims = get_jwt()
+
         if claims.get("role") != "OWNER":
-            return jsonify({"error": "Only store owners can manage purchase orders."}), 403
+            return jsonify({
+                "error": "Only store owners can manage purchase orders."
+            }), 403
+
         if not claims.get("store_id"):
-            return jsonify({"error": "Your account is not assigned to a store."}), 403
+            return jsonify({
+                "error": "Your account is not assigned to a store."
+            }), 403
+
         return view(*args, **kwargs)
 
     return wrapped
 
 
-# Get all purchase orders for the logged-in store.
-@purchase_order_bp.route("/purchase-orders", methods=["GET"])
+# ---------------------------------------------------------
+# GET ALL PURCHASE ORDERS
+# ---------------------------------------------------------
+
+@purchase_order_bp.route(
+    "/purchase-orders",
+    methods=["GET"]
+)
 @jwt_required()
 @owner_store_required
 def get_purchase_orders():
@@ -64,6 +86,7 @@ def get_purchase_orders():
 
             JOIN suppliers s
                 ON po.supplier_id = s.supplier_id
+                AND s.store_id = po.store_id
 
             LEFT JOIN purchase_order_items poi
                 ON po.purchase_order_id = poi.purchase_order_id
@@ -102,7 +125,10 @@ def get_purchase_orders():
         db.close()
 
 
-# Get one purchase order with detailed item receiving status.
+# ---------------------------------------------------------
+# GET ONE PURCHASE ORDER
+# ---------------------------------------------------------
+
 @purchase_order_bp.route(
     "/purchase-orders/<int:purchase_order_id>",
     methods=["GET"]
@@ -118,7 +144,6 @@ def get_purchase_order(purchase_order_id):
 
     try:
 
-        # Get the purchase order and supplier information.
         cursor.execute(
             """
             SELECT
@@ -133,6 +158,7 @@ def get_purchase_order(purchase_order_id):
 
             JOIN suppliers s
                 ON po.supplier_id = s.supplier_id
+                AND s.store_id = po.store_id
 
             WHERE po.purchase_order_id = %s
               AND po.store_id = %s
@@ -151,7 +177,6 @@ def get_purchase_order(purchase_order_id):
                 "error": "Purchase order not found."
             }), 404
 
-        # Get all products and their receiving progress.
         cursor.execute(
             """
             SELECT
@@ -159,6 +184,7 @@ def get_purchase_order(purchase_order_id):
                 poi.product_id,
                 p.product_name,
                 p.barcode,
+
                 poi.ordered_quantity,
                 poi.received_quantity,
                 poi.purchase_price,
@@ -173,13 +199,10 @@ def get_purchase_order(purchase_order_id):
                     WHEN poi.received_quantity = 0
                         THEN 'NOT_RECEIVED'
 
-                    WHEN poi.received_quantity <
-                         poi.ordered_quantity
+                    WHEN poi.received_quantity < poi.ordered_quantity
                         THEN 'PARTIALLY_RECEIVED'
 
-                    WHEN poi.received_quantity >=
-                         poi.ordered_quantity
-                        THEN 'RECEIVED'
+                    ELSE 'RECEIVED'
 
                 END AS receiving_status
 
@@ -206,16 +229,14 @@ def get_purchase_order(purchase_order_id):
         fully_received_items = sum(
             1
             for item in items
-            if item["received_quantity"]
-            >= item["ordered_quantity"]
+            if item["received_quantity"] >= item["ordered_quantity"]
         )
 
         partially_received_items = sum(
             1
             for item in items
             if item["received_quantity"] > 0
-            and item["received_quantity"]
-            < item["ordered_quantity"]
+            and item["received_quantity"] < item["ordered_quantity"]
         )
 
         pending_items = sum(
@@ -252,7 +273,10 @@ def get_purchase_order(purchase_order_id):
         db.close()
 
 
-# Create a new purchase order with multiple products.
+# ---------------------------------------------------------
+# CREATE PURCHASE ORDER
+# ---------------------------------------------------------
+
 @purchase_order_bp.route(
     "/purchase-orders",
     methods=["POST"]
@@ -286,7 +310,6 @@ def create_purchase_order():
 
     try:
 
-        # Verify that the supplier belongs to this store.
         cursor.execute(
             """
             SELECT supplier_id
@@ -308,7 +331,6 @@ def create_purchase_order():
                 "error": "Supplier not found."
             }), 404
 
-        # Create the main purchase order.
         cursor.execute(
             """
             INSERT INTO purchase_orders
@@ -339,34 +361,43 @@ def create_purchase_order():
 
         for item in items:
 
-            product_id = item.get("product_id")
-            ordered_quantity = item.get(
-                "ordered_quantity"
-            )
+            if not isinstance(item, dict):
+                raise ValueError("Each item must be an object.")
 
-            purchase_price = item.get(
-                "purchase_price"
-            )
+            product_id = item.get("product_id")
+            ordered_quantity = item.get("ordered_quantity")
+            purchase_price = item.get("purchase_price")
 
             if not product_id:
 
-                raise Exception(
-                    "product_id is required."
+                raise ValueError("product_id is required.")
+
+            if ordered_quantity is None:
+
+                raise ValueError("ordered_quantity is required.")
+
+            if (
+                isinstance(ordered_quantity, bool)
+                or not isinstance(ordered_quantity, int)
+                or ordered_quantity <= 0
+            ):
+
+                raise ValueError(
+                    "ordered_quantity must be a positive whole number."
                 )
 
-            if not ordered_quantity:
+            if purchase_price is not None:
 
-                raise Exception(
-                    "ordered_quantity is required."
-                )
+                try:
+                    purchase_price = float(purchase_price)
+                except (TypeError, ValueError):
+                    raise ValueError("Invalid purchase_price.")
 
-            if ordered_quantity <= 0:
+                if purchase_price < 0:
+                    raise ValueError(
+                        "purchase_price cannot be negative."
+                    )
 
-                raise Exception(
-                    "ordered_quantity must be greater than 0."
-                )
-
-            # Verify product ownership.
             cursor.execute(
                 """
                 SELECT
@@ -386,11 +417,10 @@ def create_purchase_order():
 
             if not product:
 
-                raise Exception(
+                raise ValueError(
                     f"Product ID {product_id} not found."
                 )
 
-            # Add the product to the purchase order.
             cursor.execute(
                 """
                 INSERT INTO purchase_order_items
@@ -419,36 +449,35 @@ def create_purchase_order():
             purchase_order_item_id = cursor.lastrowid
 
             created_items.append({
-                "purchase_order_item_id":
-                    purchase_order_item_id,
-
-                "product_id":
-                    product_id,
-
-                "product_name":
-                    product["product_name"],
-
-                "ordered_quantity":
-                    ordered_quantity,
-
-                "purchase_price":
-                    purchase_price
+                "purchase_order_item_id": purchase_order_item_id,
+                "product_id": product_id,
+                "product_name": product["product_name"],
+                "ordered_quantity": ordered_quantity,
+                "purchase_price": purchase_price
             })
+        
+        create_audit_log(
+            action="PURCHASE_ORDER_CREATED",
+            entity_type="PURCHASE_ORDER",
+            entity_id=str(purchase_order_id),
+            description=f"Created purchase order #{purchase_order_id} with {len(created_items)} item(s).",
+            new_data={
+                "purchase_order_id": purchase_order_id,
+                "supplier_id": supplier_id,
+                "status": "PENDING",
+                "notes": notes,
+                "items": created_items
+            },
+            connection=db
+        )
 
         db.commit()
 
         return jsonify({
-            "message":
-                "Purchase order created successfully.",
-
-            "purchase_order_id":
-                purchase_order_id,
-
-            "status":
-                "PENDING",
-
-            "items":
-                created_items
+            "message": "Purchase order created successfully.",
+            "purchase_order_id": purchase_order_id,
+            "status": "PENDING",
+            "items": created_items
         }), 201
 
     except Exception as e:
@@ -465,7 +494,10 @@ def create_purchase_order():
         db.close()
 
 
-# Update the status of a purchase order.
+# ---------------------------------------------------------
+# UPDATE PURCHASE ORDER STATUS
+# ---------------------------------------------------------
+
 @purchase_order_bp.route(
     "/purchase-orders/<int:purchase_order_id>/status",
     methods=["PUT"]
@@ -495,9 +527,30 @@ def update_purchase_order_status(purchase_order_id):
         }), 400
 
     db = get_db_connection()
-    cursor = db.cursor()
+    cursor = db.cursor(dictionary=True)
 
     try:
+
+        cursor.execute(
+            """
+            SELECT *
+            FROM purchase_orders
+            WHERE purchase_order_id = %s
+            AND store_id = %s
+            """,
+            (
+                purchase_order_id,
+                current_store_id
+            )
+        )
+
+        purchase_order = cursor.fetchone()
+
+        if not purchase_order:
+
+            return jsonify({
+                "error": "Purchase order not found."
+            }), 404
 
         cursor.execute(
             """
@@ -514,24 +567,25 @@ def update_purchase_order_status(purchase_order_id):
                 current_store_id
             )
         )
-
-        if cursor.rowcount == 0:
-
-            return jsonify({
-                "error": "Purchase order not found."
-            }), 404
+        
+        create_audit_log(
+            action="PURCHASE_ORDER_STATUS_UPDATED",
+            entity_type="PURCHASE_ORDER",
+            entity_id=str(purchase_order_id),
+            description=f"Updated purchase order #{purchase_order_id} status to {status}.",
+            old_data=purchase_order,
+            new_data={
+                "status": status
+            },
+            connection=db
+        )
 
         db.commit()
 
         return jsonify({
-            "message":
-                "Purchase order status updated successfully.",
-
-            "purchase_order_id":
-                purchase_order_id,
-
-            "status":
-                status
+            "message": "Purchase order status updated successfully.",
+            "purchase_order_id": purchase_order_id,
+            "status": status
         }), 200
 
     except Exception as e:
@@ -548,7 +602,10 @@ def update_purchase_order_status(purchase_order_id):
         db.close()
 
 
-# Cancel a purchase order that belongs to the logged-in store.
+# ---------------------------------------------------------
+# CANCEL PURCHASE ORDER
+# ---------------------------------------------------------
+
 @purchase_order_bp.route(
     "/purchase-orders/<int:purchase_order_id>/cancel",
     methods=["PUT"]
@@ -564,13 +621,10 @@ def cancel_purchase_order(purchase_order_id):
 
     try:
 
-        # Check the purchase order before cancelling.
         cursor.execute(
             """
-            SELECT
-                status
+            SELECT *
             FROM purchase_orders
-
             WHERE purchase_order_id = %s
               AND store_id = %s
             """,
@@ -591,8 +645,16 @@ def cancel_purchase_order(purchase_order_id):
         if purchase_order["status"] == "RECEIVED":
 
             return jsonify({
-                "error":
-                    "A fully received purchase order cannot be cancelled."
+                "error": (
+                    "A fully received purchase order "
+                    "cannot be cancelled."
+                )
+            }), 400
+
+        if purchase_order["status"] == "CANCELLED":
+
+            return jsonify({
+                "error": "Purchase order is already cancelled."
             }), 400
 
         cursor.execute(
@@ -609,12 +671,21 @@ def cancel_purchase_order(purchase_order_id):
                 current_store_id
             )
         )
-
+        create_audit_log(
+            action="PURCHASE_ORDER_CANCELLED",
+            entity_type="PURCHASE_ORDER",
+            entity_id=str(purchase_order_id),
+            description=f"Cancelled purchase order #{purchase_order_id}.",
+            old_data=purchase_order,
+            new_data={
+                "status": "CANCELLED"
+            },
+            connection=db
+        )
         db.commit()
 
         return jsonify({
-            "message":
-                "Purchase order cancelled successfully."
+            "message": "Purchase order cancelled successfully."
         }), 200
 
     except Exception as e:
@@ -631,7 +702,10 @@ def cancel_purchase_order(purchase_order_id):
         db.close()
 
 
-# Receive products from a supplier purchase order.
+# ---------------------------------------------------------
+# RECEIVE PURCHASE ORDER
+# ---------------------------------------------------------
+
 @purchase_order_bp.route(
     "/purchase-orders/<int:purchase_order_id>/receive",
     methods=["POST"]
@@ -656,7 +730,7 @@ def receive_purchase_order(purchase_order_id):
     cursor = db.cursor(dictionary=True)
 
     try:
-
+        db.start_transaction()
         # Lock and verify the purchase order.
         cursor.execute(
             """
@@ -689,15 +763,19 @@ def receive_purchase_order(purchase_order_id):
         if purchase_order["status"] == "CANCELLED":
 
             return jsonify({
-                "error":
-                    "Cancelled purchase orders cannot receive stock."
+                "error": (
+                    "Cancelled purchase orders "
+                    "cannot receive stock."
+                )
             }), 400
 
         if purchase_order["status"] == "RECEIVED":
 
             return jsonify({
-                "error":
-                    "Purchase order has already been fully received."
+                "error": (
+                    "Purchase order has already "
+                    "been fully received."
+                )
             }), 400
 
         supplier_id = purchase_order["supplier_id"]
@@ -705,6 +783,9 @@ def receive_purchase_order(purchase_order_id):
         received_items = []
 
         for item in items:
+
+            if not isinstance(item, dict):
+                raise ValueError("Each receiving item must be an object.")
 
             purchase_order_item_id = item.get(
                 "purchase_order_item_id"
@@ -720,25 +801,29 @@ def receive_purchase_order(purchase_order_id):
 
             if not purchase_order_item_id:
 
-                raise Exception(
+                raise ValueError(
                     "purchase_order_item_id is required."
                 )
 
             if received_quantity is None:
 
-                raise Exception(
+                raise ValueError(
                     "received_quantity is required."
                 )
 
-            if received_quantity <= 0:
+            if (
+                isinstance(received_quantity, bool)
+                or not isinstance(received_quantity, int)
+                or received_quantity <= 0
+            ):
 
-                raise Exception(
-                    "received_quantity must be greater than 0."
+                raise ValueError(
+                    "received_quantity must be a positive whole number."
                 )
 
             if not expiry_date:
 
-                raise Exception(
+                raise ValueError(
                     "expiry_date is required."
                 )
 
@@ -775,7 +860,7 @@ def receive_purchase_order(purchase_order_id):
 
             if not purchase_item:
 
-                raise Exception(
+                raise ValueError(
                     f"Purchase order item "
                     f"{purchase_order_item_id} not found."
                 )
@@ -789,9 +874,15 @@ def receive_purchase_order(purchase_order_id):
                 - purchase_item["received_quantity"]
             )
 
+            if remaining_quantity <= 0:
+
+                raise ValueError(
+                    f"{product_name} has already been fully received."
+                )
+
             if received_quantity > remaining_quantity:
 
-                raise Exception(
+                raise ValueError(
                     f"Cannot receive {received_quantity} units of "
                     f"{product_name}. Only "
                     f"{remaining_quantity} remaining."
@@ -801,9 +892,8 @@ def receive_purchase_order(purchase_order_id):
 
             if purchase_price is None:
 
-                raise Exception(
-                    f"Purchase price is missing for "
-                    f"{product_name}."
+                raise ValueError(
+                    f"Purchase price is missing for {product_name}."
                 )
 
             # Update the received quantity of the PO item.
@@ -815,12 +905,23 @@ def receive_purchase_order(purchase_order_id):
                     received_quantity + %s
 
                 WHERE purchase_order_item_id = %s
+                  AND purchase_order_id = %s
+                  AND received_quantity + %s <= ordered_quantity
                 """,
                 (
                     received_quantity,
-                    purchase_order_item_id
+                    purchase_order_item_id,
+                    purchase_order_id,
+                    received_quantity
                 )
             )
+
+            if cursor.rowcount != 1:
+
+                raise ValueError(
+                    "Unable to update purchase order item. "
+                    "Please verify the remaining quantity."
+                )
 
             # Create a stock-in transaction.
             cursor.execute(
@@ -830,35 +931,7 @@ def receive_purchase_order(purchase_order_id):
                     product_id,
                     supplier_id,
                     quantity,
-                    purchase_price
-                )
-                VALUES
-                (
-                    %s,
-                    %s,
-                    %s,
-                    %s
-                )
-                """,
-                (
-                    product_id,
-                    supplier_id,
-                    received_quantity,
-                    purchase_price
-                )
-            )
-
-            stock_in_id = cursor.lastrowid
-
-            # Create an inventory batch with expiry information.
-            cursor.execute(
-                """
-                INSERT INTO batches
-                (
-                    product_id,
-                    quantity,
                     purchase_price,
-                    expiry_date,
                     store_id
                 )
                 VALUES
@@ -872,6 +945,47 @@ def receive_purchase_order(purchase_order_id):
                 """,
                 (
                     product_id,
+                    supplier_id,
+                    received_quantity,
+                    purchase_price,
+                    current_store_id
+                )
+            )
+
+            stock_in_id = cursor.lastrowid
+
+            # Generate a unique batch number.
+            batch_number = (
+                f"PO-{purchase_order_id}-"
+                f"{purchase_order_item_id}-"
+                f"{uuid4().hex[:8].upper()}"
+            )
+
+            # Create an inventory batch.
+            cursor.execute(
+                """
+                INSERT INTO batches
+                (
+                    product_id,
+                    batch_number,
+                    quantity,
+                    purchase_price,
+                    expiry_date,
+                    store_id
+                )
+                VALUES
+                (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                """,
+                (
+                    product_id,
+                    batch_number,
                     received_quantity,
                     purchase_price,
                     expiry_date,
@@ -885,15 +999,20 @@ def receive_purchase_order(purchase_order_id):
             cursor.execute(
                 """
                 SELECT
-                    inventory_id
+                    inventory_id,
+                    stock_quantity
 
                 FROM inventory
 
                 WHERE product_id = %s
+                  AND store_id = %s
 
                 FOR UPDATE
                 """,
-                (product_id,)
+                (
+                    product_id,
+                    current_store_id
+                )
             )
 
             inventory = cursor.fetchone()
@@ -905,14 +1024,15 @@ def receive_purchase_order(purchase_order_id):
                     """
                     UPDATE inventory
 
-                    SET stock_quantity =
-                        stock_quantity + %s
+                    SET stock_quantity = stock_quantity + %s
 
                     WHERE product_id = %s
+                      AND store_id = %s
                     """,
                     (
                         received_quantity,
-                        product_id
+                        product_id,
+                        current_store_id
                     )
                 )
 
@@ -924,21 +1044,24 @@ def receive_purchase_order(purchase_order_id):
                     INSERT INTO inventory
                     (
                         product_id,
-                        stock_quantity
+                        stock_quantity,
+                        store_id
                     )
                     VALUES
                     (
+                        %s,
                         %s,
                         %s
                     )
                     """,
                     (
                         product_id,
-                        received_quantity
+                        received_quantity,
+                        current_store_id
                     )
                 )
 
-            # Record the inventory movement.
+            # Record inventory movement.
             cursor.execute(
                 """
                 INSERT INTO stock_movements
@@ -946,12 +1069,14 @@ def receive_purchase_order(purchase_order_id):
                     product_id,
                     movement_type,
                     quantity,
-                    reference_id
+                    reference_id,
+                    store_id
                 )
                 VALUES
                 (
                     %s,
                     'STOCK_IN',
+                    %s,
                     %s,
                     %s
                 )
@@ -959,11 +1084,12 @@ def receive_purchase_order(purchase_order_id):
                 (
                     product_id,
                     received_quantity,
-                    stock_in_id
+                    stock_in_id,
+                    current_store_id
                 )
             )
 
-            # Record detailed purchase order receiving history.
+            # Record purchase order receiving history.
             cursor.execute(
                 """
                 INSERT INTO purchase_order_receiving_history
@@ -975,10 +1101,12 @@ def receive_purchase_order(purchase_order_id):
                     purchase_price,
                     expiry_date,
                     stock_in_id,
-                    batch_id
+                    batch_id,
+                    store_id
                 )
                 VALUES
                 (
+                    %s,
                     %s,
                     %s,
                     %s,
@@ -997,36 +1125,22 @@ def receive_purchase_order(purchase_order_id):
                     purchase_price,
                     expiry_date,
                     stock_in_id,
-                    batch_id
+                    batch_id,
+                    current_store_id
                 )
             )
 
             receiving_id = cursor.lastrowid
 
             received_items.append({
-                "receiving_id":
-                    receiving_id,
-
-                "purchase_order_item_id":
-                    purchase_order_item_id,
-
-                "product_id":
-                    product_id,
-
-                "product_name":
-                    product_name,
-
-                "received_quantity":
-                    received_quantity,
-
-                "stock_in_id":
-                    stock_in_id,
-
-                "batch_id":
-                    batch_id,
-
-                "expiry_date":
-                    expiry_date
+                "receiving_id": receiving_id,
+                "purchase_order_item_id": purchase_order_item_id,
+                "product_id": product_id,
+                "product_name": product_name,
+                "received_quantity": received_quantity,
+                "stock_in_id": stock_in_id,
+                "batch_id": batch_id,
+                "expiry_date": expiry_date
             })
 
         # Check whether all PO items are completely received.
@@ -1069,21 +1183,33 @@ def receive_purchase_order(purchase_order_id):
                 current_store_id
             )
         )
+        
+        create_audit_log(
+            action="PURCHASE_ORDER_RECEIVED",
+            entity_type="PURCHASE_ORDER",
+            entity_id=str(purchase_order_id),
+            description=(
+                f"Received {len(received_items)} item transaction(s) "
+                f"for purchase order #{purchase_order_id}. "
+                f"New status: {new_status}."
+            ),
+            old_data={
+                "status": purchase_order["status"]
+            },
+            new_data={
+                "status": new_status,
+                "received_items": received_items
+            },
+            connection=db
+        )
 
         db.commit()
 
         return jsonify({
-            "message":
-                "Purchase order received successfully.",
-
-            "purchase_order_id":
-                purchase_order_id,
-
-            "status":
-                new_status,
-
-            "received_items":
-                received_items
+            "message": "Purchase order received successfully.",
+            "purchase_order_id": purchase_order_id,
+            "status": new_status,
+            "received_items": received_items
         }), 200
 
     except Exception as e:
@@ -1100,7 +1226,10 @@ def receive_purchase_order(purchase_order_id):
         db.close()
 
 
-# Get complete receiving history for one purchase order.
+# ---------------------------------------------------------
+# GET PURCHASE ORDER RECEIVING HISTORY
+# ---------------------------------------------------------
+
 @purchase_order_bp.route(
     "/purchase-orders/<int:purchase_order_id>/receiving-history",
     methods=["GET"]
@@ -1116,7 +1245,7 @@ def get_purchase_order_receiving_history(purchase_order_id):
 
     try:
 
-        # Verify that the purchase order belongs to this store.
+        # Verify purchase order ownership.
         cursor.execute(
             """
             SELECT
@@ -1170,6 +1299,7 @@ def get_purchase_order_receiving_history(purchase_order_id):
                 ON porh.product_id = p.product_id
 
             WHERE porh.purchase_order_id = %s
+              AND porh.store_id = %s
               AND p.store_id = %s
 
             ORDER BY
@@ -1178,6 +1308,7 @@ def get_purchase_order_receiving_history(purchase_order_id):
             """,
             (
                 purchase_order_id,
+                current_store_id,
                 current_store_id
             )
         )
@@ -1185,17 +1316,10 @@ def get_purchase_order_receiving_history(purchase_order_id):
         receiving_history = cursor.fetchall()
 
         return jsonify({
-            "purchase_order_id":
-                purchase_order_id,
-
-            "purchase_order_status":
-                purchase_order["status"],
-
-            "receiving_count":
-                len(receiving_history),
-
-            "receiving_history":
-                receiving_history
+            "purchase_order_id": purchase_order_id,
+            "purchase_order_status": purchase_order["status"],
+            "receiving_count": len(receiving_history),
+            "receiving_history": receiving_history
         }), 200
 
     except Exception as e:

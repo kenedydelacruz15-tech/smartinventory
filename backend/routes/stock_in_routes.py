@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt
 
+from audit_logger import create_audit_log
 from backend.routes.user_routes import role_required
 from backend.database import get_db_connection
 
@@ -131,10 +132,18 @@ def create_stock_in():
         if supplier_id is not None:
 
             cursor.execute("""
-                SELECT supplier_id, supplier_name
+                SELECT
+                    supplier_id,
+                    supplier_name,
+                    contact_person,
+                    contact_number,
+                    email,
+                    address,
+                    deleted_at
                 FROM suppliers
                 WHERE supplier_id = %s
                 AND store_id = %s
+                AND deleted_at IS NULL
             """, (
                 supplier_id,
                 store_id
@@ -240,6 +249,29 @@ def create_stock_in():
             movement_remarks or None,
             store_id
         ))
+        
+        create_audit_log(
+            action="STOCK_IN_CREATED",
+            entity_type="STOCK_IN",
+            entity_id=str(stock_in_id),
+            description=(
+                f"Added {quantity} units of {product['product_name']} "
+                f"to inventory."
+            ),
+            new_data={
+                "stock_in_id": stock_in_id,
+                "product_id": product_id,
+                "product_name": product["product_name"],
+                "supplier_id": supplier_id,
+                "quantity": quantity,
+                "reason": reference_type,
+                "reference_number": reference_number,
+                "previous_quantity": previous_quantity,
+                "new_quantity": new_quantity,
+                "store_id": store_id
+            },
+            connection=connection
+        )
 
         connection.commit()
 

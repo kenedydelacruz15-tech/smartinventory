@@ -2,6 +2,7 @@ import logging
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt
+from backend.audit_logger import create_audit_log
 
 from backend.routes.user_routes import role_required
 from backend.database import get_db_connection
@@ -20,11 +21,11 @@ stock_out_bp = Blueprint(
 
 
 # Removes stock from inventory and records the stock-out reason.
+
 @stock_out_bp.route("/", methods=["POST"])
 @role_required("OWNER", "STAFF")
 def create_stock_out():
 
-    # Gets the JSON data sent by the user.
     data = request.get_json()
 
     if not data:
@@ -32,36 +33,27 @@ def create_stock_out():
             "error": "Request body is required."
         }), 400
 
-    # Gets the product ID.
     product_id = data.get("product_id")
-
-    # Gets the quantity being removed.
     quantity = data.get("quantity")
 
-    # Gets the stock-out reason.
     stock_out_reason = str(data.get(
         "stock_out_reason",
         data.get("reference_type", "OTHER")
     )).strip().upper()
 
-    # Gets the optional reference number.
     reference_number = str(data.get(
-        "reference_number",
-        ""
+        "reference_number", ""
     )).strip()
 
-    # Gets the optional remarks.
-    remarks = str(data.get(
-        "remarks",
-        ""
-    )).strip()
+    remarks = str(data.get("remarks", "")).strip()
+
     movement_remarks = remarks
+
     if reference_number:
         movement_remarks = f"Reference: {reference_number}"
         if remarks:
-            movement_remarks = f"{movement_remarks} | {remarks}"
+            movement_remarks += f" | {remarks}"
 
-    # Defines the allowed stock-out reasons.
     allowed_reasons = [
         "SALE",
         "DAMAGED",
@@ -72,21 +64,17 @@ def create_stock_out():
         "OTHER"
     ]
 
-    # Requires a product ID and quantity.
     if not product_id or quantity is None:
         return jsonify({
             "error": "Product ID and quantity are required."
         }), 400
 
-    # Validates the stock-out reason.
-    if stock_out_reason not in allowed_reasons:
-        return jsonify({
-            "error": "Invalid stock-out reason.",
-            "allowed_reasons": allowed_reasons
-        }), 400
-
-    # Validates the quantity.
     try:
+        product_id = int(product_id)
+
+        if product_id <= 0:
+            raise ValueError
+
         quantity = int(quantity)
 
         if quantity <= 0:
@@ -94,18 +82,17 @@ def create_stock_out():
 
     except (ValueError, TypeError):
         return jsonify({
-            "error": "Quantity must be greater than zero."
+            "error": "Product ID and quantity must be valid positive numbers."
         }), 400
 
-    if not product_id or quantity is None:
+    if stock_out_reason not in allowed_reasons:
         return jsonify({
-            "error": "Product ID and quantity are required."
+            "error": "Invalid stock-out reason.",
+            "allowed_reasons": allowed_reasons
         }), 400
 
-    # Gets the logged-in user's store ID.
     store_id = get_jwt().get("store_id")
 
-    # Prevents users without a store from creating stock-out records.
     if not store_id:
         return jsonify({
             "error": "You are not assigned to a store."
@@ -115,74 +102,58 @@ def create_stock_out():
     cursor = None
 
     try:
-
-        # Gets a database connection.
         connection = get_db_connection()
 
         ensure_stock_out_store_foreign_key(connection)
 
-        # Starts a database transaction.
         connection.start_transaction()
 
-        # Creates a dictionary cursor.
         cursor = connection.cursor(dictionary=True)
 
-        # Checks whether the product belongs to the user's store.
+        # Verify product belongs to the store.
         cursor.execute("""
             SELECT product_id, product_name
             FROM products
             WHERE product_id = %s
-            AND store_id = %s
-        """, (
-            product_id,
-            store_id
-        ))
+                AND store_id = %s
+        """, (product_id, store_id))
 
         product = cursor.fetchone()
 
-        # Stops when the product does not belong to the store.
         if not product:
             connection.rollback()
-
             return jsonify({
                 "error": "Product not found in your store."
             }), 404
 
-        # Gets the current inventory record.
+        # Lock inventory record.
         cursor.execute("""
             SELECT inventory_id, stock_quantity
             FROM inventory
             WHERE product_id = %s
-            AND store_id = %s
+                AND store_id = %s
             FOR UPDATE
-        """, (
-            product_id,
-            store_id
-        ))
+        """, (product_id, store_id))
 
         inventory = cursor.fetchone()
 
-        # Stops when no inventory record exists.
         if not inventory:
             connection.rollback()
-
             return jsonify({
                 "error": "Inventory record not found."
             }), 404
 
-        # Gets the current stock quantity.
-        previous_quantity = inventory["stock_quantity"]
+        previous_quantity = int(
+            inventory["stock_quantity"] or 0
+        )
 
-        # Prevents removing more stock than available.
         if quantity > previous_quantity:
             connection.rollback()
-
             return jsonify({
                 "error": "Insufficient stock.",
                 "available_stock": previous_quantity
             }), 400
 
-        # Calculates the remaining stock.
         new_quantity = previous_quantity - quantity
 
         legacy_reason = {
@@ -194,6 +165,7 @@ def create_stock_out():
             "ADJUSTMENT": "OTHER",
             "OTHER": "OTHER"
         }[stock_out_reason]
+
         legacy_stock_out_reason = (
             stock_out_reason
             if stock_out_reason in {
@@ -205,16 +177,13 @@ def create_stock_out():
             }
             else "OTHER"
         )
+
         stock_out_notes = f"Reason: {stock_out_reason}"
+
         if movement_remarks:
-            stock_out_notes = f"{stock_out_notes} | {movement_remarks}"
+            stock_out_notes += f" | {movement_remarks}"
 
-        cursor.close()
-
-        # Creates a normal cursor for database changes.
-        cursor = connection.cursor()
-
-        # Creates the stock-out record.
+        # Insert stock-out record.
         cursor.execute("""
             INSERT INTO stock_out (
                 product_id,
@@ -225,7 +194,10 @@ def create_stock_out():
                 store_id,
                 stock_out_reason
             )
-            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
+            VALUES (
+                %s, %s, %s, %s,
+                CURRENT_TIMESTAMP, %s, %s
+            )
         """, (
             product_id,
             quantity,
@@ -235,22 +207,21 @@ def create_stock_out():
             legacy_stock_out_reason
         ))
 
-        # Gets the newly created stock-out ID.
         stock_out_id = cursor.lastrowid
 
-        # Updates the inventory quantity.
+        # Update inventory.
         cursor.execute("""
             UPDATE inventory
             SET stock_quantity = %s
             WHERE product_id = %s
-            AND store_id = %s
+                AND store_id = %s
         """, (
             new_quantity,
             product_id,
             store_id
         ))
 
-        # Records the transaction in stock movements.
+        # Record stock movement.
         cursor.execute("""
             INSERT INTO stock_movements (
                 product_id,
@@ -264,15 +235,8 @@ def create_stock_out():
                 store_id
             )
             VALUES (
-                %s,
-                'STOCK_OUT',
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s
+                %s, 'STOCK_OUT', %s, %s, %s,
+                %s, %s, %s, %s
             )
         """, (
             product_id,
@@ -281,17 +245,47 @@ def create_stock_out():
             new_quantity,
             stock_out_reason,
             stock_out_id,
-            movement_remarks if movement_remarks else None,
+            movement_remarks or None,
             store_id
         ))
 
-        # Saves all database changes.
+        # Insert audit log using the SAME transaction.
+        create_audit_log(
+            action="STOCK_OUT_CREATED",
+            entity_type="STOCK_OUT",
+            entity_id=str(stock_out_id),
+            description=(
+                f"Removed {quantity} units of "
+                f"{product['product_name']} from inventory. "
+                f"Stock changed from {previous_quantity} "
+                f"to {new_quantity}."
+            ),
+            old_data={
+                "stock_quantity": previous_quantity
+            },
+            new_data={
+                "stock_out_id": stock_out_id,
+                "product_id": product_id,
+                "product_name": product["product_name"],
+                "quantity": quantity,
+                "reason": stock_out_reason,
+                "reference_number": reference_number,
+                "remarks": remarks,
+                "previous_quantity": previous_quantity,
+                "new_quantity": new_quantity,
+                "store_id": store_id
+            },
+            connection=connection
+        )
+
+        # Commit everything together.
         connection.commit()
 
         return jsonify({
             "message": "Stock removed successfully.",
             "product_id": product_id,
             "product_name": product["product_name"],
+            "stock_out_id": stock_out_id,
             "stock_out_reason": stock_out_reason,
             "previous_quantity": previous_quantity,
             "removed_quantity": quantity,
@@ -303,7 +297,9 @@ def create_stock_out():
         if connection:
             connection.rollback()
 
-        logging.getLogger(__name__).exception("Stock-out request failed")
+        logging.getLogger(__name__).exception(
+            "Stock-out request failed"
+        )
 
         return jsonify({
             "error": stock_out_error_message(e)
@@ -316,6 +312,7 @@ def create_stock_out():
 
         if connection:
             connection.close()
+
 
 
 # Gets all stock-out records from the logged-in user's store.
