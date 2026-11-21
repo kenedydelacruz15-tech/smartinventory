@@ -87,7 +87,38 @@ def get_inventory():
                 i.stock_quantity,
                 i.is_active,
                 i.store_id,
-                i.updated_at
+                i.updated_at,
+                CAST(p.created_at AS CHAR) AS product_created_at,
+                (
+                    SELECT CAST(MAX(sm.movement_date) AS CHAR)
+                    FROM stock_movements sm
+                    WHERE sm.product_id = i.product_id
+                      AND sm.store_id = i.store_id
+                      AND sm.movement_type = 'STOCK_IN'
+                      AND COALESCE(sm.reference_type, '') <> 'ADJUSTMENT'
+                ) AS last_stock_in_at,
+                (
+                    SELECT CAST(MAX(sm.movement_date) AS CHAR)
+                    FROM stock_movements sm
+                    WHERE sm.product_id = i.product_id
+                      AND sm.store_id = i.store_id
+                      AND sm.movement_type = 'STOCK_OUT'
+                      AND COALESCE(sm.reference_type, '') <> 'ADJUSTMENT'
+                ) AS last_stock_out_at,
+                (
+                    SELECT CAST(MAX(sm.movement_date) AS CHAR)
+                    FROM stock_movements sm
+                    WHERE sm.product_id = i.product_id
+                      AND sm.store_id = i.store_id
+                      AND sm.reference_type = 'ADJUSTMENT'
+                ) AS last_adjusted_at,
+                (
+                    SELECT GROUP_CONCAT(DISTINCT si.supplier_id)
+                    FROM stock_in si
+                    WHERE si.product_id = i.product_id
+                      AND si.store_id = i.store_id
+                      AND si.supplier_id IS NOT NULL
+                ) AS supplier_ids
             FROM inventory i
 
             INNER JOIN products p
@@ -802,8 +833,6 @@ def stock_out(inventory_id):
 
     try:
         connection = get_db_connection()
-
-        ensure_stock_out_store_foreign_key(connection)
 
         connection.start_transaction()
 

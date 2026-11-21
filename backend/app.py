@@ -4,6 +4,8 @@ from datetime import timedelta
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from dotenv import load_dotenv
+load_dotenv()
 
 from backend.routes.category_routes import category_bp
 from backend.routes.product_routes import product_bp
@@ -39,8 +41,12 @@ os.makedirs(
 )
 
 # Change this origin when the Vite frontend is hosted at a different address.
-CORS(app,
-    resources={r"/*": {"origins": "http://localhost:5173"}},
+CORS(
+    app,
+    resources={r"/*": {"origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ]}},
     supports_credentials=True
 )
 

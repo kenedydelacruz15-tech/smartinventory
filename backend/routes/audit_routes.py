@@ -1,12 +1,12 @@
 """Audit-log API routes for SmartInventory's current audit_logs schema."""
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from backend.database import get_db_connection
-from backend.audit_logger import ensure_audit_logs_table
 
 audit_bp = Blueprint("audit_bp", __name__)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
@@ -26,7 +26,6 @@ def _fetch_logs(where_sql="", params=None, limit=250):
     cursor = None
     try:
         connection = get_db_connection()
-        ensure_audit_logs_table(connection)
         cursor = connection.cursor(dictionary=True)
         cursor.execute("SET time_zone = '+08:00'")
         sql = """
@@ -83,6 +82,42 @@ def _store_id():
     return get_jwt().get("store_id")
 
 
+# Filter names the Audit Logs page sends -> the real action names stored in audit_logs.
+# STOCK_IN / STOCK_OUT cover both the old names and the current *_CREATED names.
+COMMON_ACTION_GROUPS = {
+    "STOCK_IN": ["STOCK_IN", "STOCK_IN_CREATED"],
+    "STOCK_OUT": ["STOCK_OUT", "STOCK_OUT_CREATED"],
+}
+ADMIN_ACTION_GROUPS = {
+    **COMMON_ACTION_GROUPS,
+    "STORE_CREATED": ["STORE_CREATED"],
+    "USER_ADDED": ["USER_ADDED", "USER_CREATED", "OWNER_REGISTERED"],
+    "USER_LOGIN": ["USER_LOGIN"],
+    "USER_LOGOUT": ["USER_LOGOUT"],
+}
+OWNER_ACTION_GROUPS = {
+    **COMMON_ACTION_GROUPS,
+    "USER_ADDED": ["USER_ADDED", "USER_CREATED"],
+}
+
+
+def _action_filter(category, groups, strict):
+    """Returns (sql_fragment, params), or (None, error_message) for an invalid filter."""
+    category = (category or "ALL").strip().upper()
+    if category == "ALL":
+        return "", []
+    if category in groups:
+        actions = groups[category]
+    elif strict:
+        return None, "Invalid event category."
+    elif re.fullmatch(r"[A-Z_]{1,100}", category):
+        actions = [category]
+    else:
+        return None, "Invalid event category."
+    placeholders = ", ".join(["%s"] * len(actions))
+    return f"action IN ({placeholders})", list(actions)
+
+
 @audit_bp.route("/api/audit-logs/admin", methods=["GET"])
 @jwt_required()
 def get_admin_audit_logs():
@@ -93,18 +128,11 @@ def get_admin_audit_logs():
     if limit is None:
         return jsonify({"error": "limit must be a valid number."}), 400
 
-    category = (request.args.get("category") or "ALL").strip().upper()
-    allowed = {
-        "ALL", "STORE_CREATED", "USER_CREATED", "USER_LOGIN", "USER_LOGOUT"
-    }
-    if category not in allowed:
-        return jsonify({"error": "Invalid event category."}), 400
-
-    where_sql = ""
-    params = []
-    if category != "ALL":
-        where_sql = "action = %s"
-        params.append(category)
+    where_sql, params = _action_filter(
+        request.args.get("category"), ADMIN_ACTION_GROUPS, strict=True
+    )
+    if where_sql is None:
+        return jsonify({"error": params}), 400
 
     records, error = _fetch_logs(where_sql, params, limit)
     if error:
@@ -129,7 +157,19 @@ def get_owner_audit_logs():
     if limit is None:
         return jsonify({"error": "limit must be a valid number."}), 400
 
-    records, error = _fetch_logs("store_id = %s", [store_id], limit)
+    filter_sql, filter_params = _action_filter(
+        request.args.get("category"), OWNER_ACTION_GROUPS, strict=False
+    )
+    if filter_sql is None:
+        return jsonify({"error": filter_params}), 400
+
+    where_sql = "store_id = %s"
+    params = [store_id]
+    if filter_sql:
+        where_sql += " AND " + filter_sql
+        params += filter_params
+
+    records, error = _fetch_logs(where_sql, params, limit)
     if error:
         return jsonify({
             "error": "Could not load owner audit logs.",

@@ -15,7 +15,19 @@ const ACTION_LABELS = {
   USER_ADDED: "Add", USER_CREATED: "Add", USER_EDITED: "Edit", USER_UPDATED: "Edit",
   USER_ACTIVATED: "Activate", USER_DEACTIVATED: "Deactivate", USER_PERMANENTLY_DELETED: "Delete",
   USER_LOGIN: "Login", USER_LOGOUT: "Logout",
-  STORE_CREATED: "Add", STORE_PERMANENTLY_DELETED: "Delete",
+  STORE_CREATED: "Add", STORE_UPDATED: "Edit", STORE_PROFILE_UPDATED: "Edit", STORE_PERMANENTLY_DELETED: "Delete",
+  STOCK_IN_CREATED: "Stock In", STOCK_OUT_CREATED: "Stock Out",
+  OWNER_REGISTERED: "Register", USER_PASSWORD_CHANGED: "Password Change",
+  SUPPLIER_ADDED: "Add", SUPPLIER_EDITED: "Edit", SUPPLIER_DELETED: "Deactivate",
+  SUPPLIER_RESTORED: "Restore", SUPPLIER_PERMANENTLY_DELETED: "Delete",
+  PURCHASE_ORDER_CREATED: "Add", PURCHASE_ORDER_STATUS_UPDATED: "Status Update",
+  PURCHASE_ORDER_CANCELLED: "Cancel", PURCHASE_ORDER_RECEIVED: "Receive",
+};
+// Current stock actions share the colour styling of the original STOCK_IN / STOCK_OUT names.
+const STYLE_KEYS = { STOCK_IN_CREATED: "STOCK_IN", STOCK_OUT_CREATED: "STOCK_OUT" };
+const styleKey = (log) => {
+  const action = String(log.action || "other").toUpperCase();
+  return STYLE_KEYS[action] || action;
 };
 const pretty = (value) => String(value || "—").replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 const actionLabel = (log) => ACTION_LABELS[String(log.action || "").toUpperCase()] || pretty(log.action || log.event_category);
@@ -45,9 +57,8 @@ export default function AuditLogs() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filteredLogs = filter !== "ALL"
-    ? logs.filter((log) => String(log.action || "").toUpperCase() === filter)
-    : logs;
+  // The backend already applies the selected filter.
+  const filteredLogs = logs;
 
   return (
     <div className="admin-page audit-logs-page">
@@ -60,7 +71,7 @@ export default function AuditLogs() {
         <label htmlFor="audit-filter">{isAdmin ? "Event filter" : "Activity filter"}</label>
         <select id="audit-filter" value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="ALL">All activities</option>
-          {isAdmin ? <><option value="STORE_CREATED">Store Added</option><option value="USER_CREATED">User Added</option><option value="USER_LOGIN">Login</option><option value="USER_LOGOUT">Logout</option></> : <>
+          {isAdmin ? <><option value="STORE_CREATED">Store Added</option><option value="USER_ADDED">User Added</option><option value="USER_LOGIN">Login</option><option value="USER_LOGOUT">Logout</option></> : <>
             <option value="STOCK_IN">Stock In</option><option value="STOCK_OUT">Stock Out</option><option value="INVENTORY_ADJUSTED">Adjust</option>
             <option value="USER_LOGIN">Login</option><option value="USER_LOGOUT">Logout</option>
             <option value="INVENTORY_DEACTIVATED">Inventory Deactivated</option><option value="PRODUCT_ADDED">Product Added</option><option value="PRODUCT_EDITED">Product Edited</option><option value="PRODUCT_DEACTIVATED">Product Deactivated</option>
@@ -79,7 +90,7 @@ export default function AuditLogs() {
                 <tr key={log.log_id ?? log.audit_log_id}>
                   <td>{log.created_at ? `${new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Manila" }).format(new Date(log.created_at))} PHT` : "—"}</td>
                   <td><span className="audit-source-pill">{sourceLabel(log)}</span></td>
-                  <td><span className={`audit-action-pill audit-action-${String(log.action || "other").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>{actionLabel(log)}</span></td>
+                  <td><span className={`audit-action-pill audit-action-${styleKey(log).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>{actionLabel(log)}</span></td>
                   <td className="audit-description">{log.description || `${sourceLabel(log)} #${log.entity_id || "—"}`}</td>
                   <td>{log.username || log.actor_name || "—"}</td>
                   <td>{log.actor_role || "—"}</td>

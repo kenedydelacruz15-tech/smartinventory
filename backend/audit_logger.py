@@ -1,6 +1,6 @@
 """Detailed audit logging helper for SmartInventory."""
 import json
-from flask_jwt_extended import get_jwt
+from flask_jwt_extended import get_jwt, get_jwt_identity
 from backend.database import get_db_connection
 
 
@@ -25,21 +25,23 @@ def ensure_audit_logs_table(connection):
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS audit_logs (
-                    log_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    log_id BIGINT NOT NULL AUTO_INCREMENT,
                     actor_user_id INT NULL,
-                    actor_name VARCHAR(100) NULL,
-                    actor_role VARCHAR(20) NULL,
+                    actor_name VARCHAR(150) NULL,
+                    actor_role VARCHAR(30) NULL,
                     store_id INT NULL,
-                    event_category VARCHAR(40) NOT NULL,
-                    action VARCHAR(80) NOT NULL,
+                    event_category VARCHAR(80) NOT NULL,
+                    action VARCHAR(100) NOT NULL,
                     entity_type VARCHAR(50) NULL,
                     entity_id VARCHAR(100) NULL,
-                    description TEXT NULL,
+                    description TEXT NOT NULL,
                     details LONGTEXT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (log_id),
-                    INDEX idx_audit_logs_store_created (store_id, created_at),
-                    INDEX idx_audit_logs_action_created (action, created_at)
+                    KEY idx_audit_logs_created_at (created_at),
+                    KEY idx_audit_logs_category (event_category),
+                    KEY idx_audit_logs_actor (actor_user_id),
+                    KEY idx_audit_logs_store (store_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
 
@@ -70,9 +72,36 @@ def _event_category(action, entity_type=None):
     return str(entity_type or "GENERAL").upper()
 
 
-def create_audit_log(store_id, action, entity_type, entity_id=None, description=None,
+def _jwt_claims():
+    """Claims of the current request's verified JWT, or {} outside an authenticated request."""
+    try:
+        return get_jwt() or {}
+    except Exception:
+        return {}
+
+
+def _jwt_user_id():
+    """User id stored as the JWT identity, or None when there is no authenticated user."""
+    try:
+        identity = get_jwt_identity()
+        return int(identity) if identity is not None else None
+    except Exception:
+        return None
+
+
+def create_audit_log(store_id=None, action=None, entity_type=None, entity_id=None, description=None,
                      user_id=None, old_data=None, new_data=None,
                      connection=None):
+
+    claims = _jwt_claims()
+
+    # When the caller omits them, use the authenticated user's store and id.
+    # (Login passes user_id itself because no JWT exists yet at that point.)
+    if store_id is None:
+        store_id = claims.get("store_id")
+
+    if user_id is None:
+        user_id = _jwt_user_id()
 
     own_connection = connection is None
     cursor = actor_cursor = None
@@ -80,7 +109,6 @@ def create_audit_log(store_id, action, entity_type, entity_id=None, description=
     try:
         if own_connection:
             connection = get_db_connection()
-            ensure_audit_logs_table(connection)
 
         actor_name = None
         actor_role = None
@@ -101,18 +129,9 @@ def create_audit_log(store_id, action, entity_type, entity_id=None, description=
                 actor = actor_cursor.fetchone()
 
                 if actor:
-                    actor_role = str(
-                        actor.get("role") or ""
-                    ).upper()
-
-                    actor_name = (
-                        actor.get("username")
-                        if actor_role in ("OWNER", "STAFF")
-                        else (
-                            actor.get("full_name")
-                            or actor.get("username")
-                        )
-                    )
+                    actor_role = str(actor.get("role") or "").upper() or None
+                    # Same label for every role: the username.
+                    actor_name = actor.get("username") or actor.get("full_name")
 
             except Exception as exc:
                 print("AUDIT ACTOR LOOKUP WARNING:", repr(exc))
@@ -122,22 +141,11 @@ def create_audit_log(store_id, action, entity_type, entity_id=None, description=
                     actor_cursor.close()
                     actor_cursor = None
 
-        claims = {}
-
-        if user_id is not None and (not actor_name or not actor_role):
-            try:
-                claims = get_jwt()
-            except RuntimeError:
-                claims = {}
-
-        actor_role = (
-            actor_role
-            or str(claims.get("role") or "").upper()
-            or None
-        )
-
-        if not actor_name and actor_role in ("OWNER", "STAFF"):
-            actor_name = claims.get("username")
+            # Fall back to the JWT if the user lookup found nothing.
+            if not actor_role:
+                actor_role = str(claims.get("role") or "").upper() or None
+            if not actor_name:
+                actor_name = claims.get("username")
 
         details = _json_payload(old_data, new_data)
 

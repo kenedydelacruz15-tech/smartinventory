@@ -30,6 +30,62 @@ const formatMovementReason = (reason) =>
     : "Unspecified";
 
 
+const DATE_FILTERS = [
+  { value: "recent", label: "Recently Added" },
+  { value: "today", label: "Added Today" },
+  { value: "week", label: "Added This Week" },
+  { value: "month", label: "Added This Month" },
+  { value: "oldest", label: "Oldest Products" },
+];
+
+const MOVEMENT_FILTERS = [
+  { value: "recent_in", label: "Recently Stocked In" },
+  { value: "recent_out", label: "Recently Stocked Out" },
+  { value: "in_today", label: "Stock In Today" },
+  { value: "out_today", label: "Stock Out Today" },
+  { value: "in_week", label: "Stock In This Week" },
+  { value: "out_week", label: "Stock Out This Week" },
+  { value: "recent_adjusted", label: "Recently Adjusted Stock" },
+];
+
+const PAGE_SIZES = [10, 25, 50, 100];
+
+// Every category gets its own stable colour, so new categories are coloured
+// automatically (same name = same colour, no setup needed).
+const categoryBadgeStyle = (name = "") => {
+  let hash = 0;
+  for (const ch of String(name).trim().toLowerCase()) {
+    hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  }
+  const hue = hash % 360;
+  return {
+    background: `hsl(${hue} 85% 92%)`,
+    color: `hsl(${hue} 65% 26%)`,
+    border: `1px solid hsl(${hue} 70% 82%)`,
+  };
+};
+
+// The API sends "YYYY-MM-DD HH:MM:SS" (server local time).
+const parseDbDate = (value) => {
+  if (!value) return null;
+  const date = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDateTime = (value) => {
+  const date = parseDbDate(value);
+  return date
+    ? date.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })
+    : "—";
+};
+
+const formatPeso = (value) =>
+  `₱${Number(value || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+
 function ProductThumbnail({ item }) {
   const imagePath =
     item.product_image_url ||
@@ -98,8 +154,24 @@ export default function Inventory() {
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  // Search
+  // Search + filters + list controls
   const [search, setSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFilter, setDateFilter] = useState("");
+  const [movementFilter, setMovementFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [minStock, setMinStock] = useState("");
+  const [maxStock, setMaxStock] = useState("");
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
+  const [viewMode, setViewMode] = useState("list");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [viewItem, setViewItem] = useState(null);
+  const [rowMenu, setRowMenu] = useState(null);
 
   // Stock movement modal
   const [movementItem, setMovementItem] = useState(null);
@@ -126,7 +198,6 @@ export default function Inventory() {
       setError("");
 
       const params = { status: "all" };
-      if (search.trim()) params.search = search.trim();
       const res = await api.get("/api/inventory/", { params });
 
       setItems(res.data || []);
@@ -204,19 +275,186 @@ export default function Inventory() {
     return true;
   });
 
-  const visibleItems = statusItems.filter((item) =>
-    selectedCategory === "ALL" ||
-    (item.category_name || "Uncategorized").toLowerCase() === selectedCategory.toLowerCase()
-  );
-
   const activeCount = items.filter(isActiveItem).length;
   const inactiveCount = items.length - activeCount;
 
-  // Search when user presses Enter
-  const handleSearch = (e) => {
-    e.preventDefault();
-    loadInventory();
+  const brandOptions = [...new Set(items.map((item) => item.brand).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+
+  const filteredItems = (() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(todayStart.getDate() - ((todayStart.getDay() + 6) % 7)); // Monday
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const query = search.trim().toLowerCase();
+    const toNum = (value) => (value === "" ? null : Number(value));
+    const minP = toNum(minPrice);
+    const maxP = toNum(maxPrice);
+    const minS = toNum(minStock);
+    const maxS = toNum(maxStock);
+    const since = (date, from) => Boolean(date && date >= from);
+
+    const list = statusItems.filter((item) => {
+      if (
+        selectedCategory !== "ALL" &&
+        (item.category_name || "Uncategorized").toLowerCase() !== selectedCategory.toLowerCase()
+      ) return false;
+
+      if (
+        query &&
+        ![item.product_name, item.sku, item.part_number, item.barcode, item.brand, item.category_name]
+          .some((value) => String(value || "").toLowerCase().includes(query))
+      ) return false;
+
+      if (brandFilter && item.brand !== brandFilter) return false;
+      if (
+        supplierFilter &&
+        !String(item.supplier_ids || "").split(",").includes(String(supplierFilter))
+      ) return false;
+
+      const price = Number(item.selling_price || 0);
+      const stock = Number(item.stock_quantity || 0);
+      if (minP !== null && price < minP) return false;
+      if (maxP !== null && price > maxP) return false;
+      if (minS !== null && stock < minS) return false;
+      if (maxS !== null && stock > maxS) return false;
+
+      const created = parseDbDate(item.product_created_at);
+      if (dateFilter === "today" && !since(created, todayStart)) return false;
+      if (dateFilter === "week" && !since(created, weekStart)) return false;
+      if (dateFilter === "month" && !since(created, monthStart)) return false;
+
+      const lastIn = parseDbDate(item.last_stock_in_at);
+      const lastOut = parseDbDate(item.last_stock_out_at);
+      const lastAdj = parseDbDate(item.last_adjusted_at);
+      if (movementFilter === "recent_in" && !lastIn) return false;
+      if (movementFilter === "recent_out" && !lastOut) return false;
+      if (movementFilter === "recent_adjusted" && !lastAdj) return false;
+      if (movementFilter === "in_today" && !since(lastIn, todayStart)) return false;
+      if (movementFilter === "out_today" && !since(lastOut, todayStart)) return false;
+      if (movementFilter === "in_week" && !since(lastIn, weekStart)) return false;
+      if (movementFilter === "out_week" && !since(lastOut, weekStart)) return false;
+      return true;
+    });
+
+    const time = (value) => parseDbDate(value)?.getTime() || 0;
+    const dir = sortDir === "asc" ? 1 : -1;
+    let compare;
+    if (movementFilter === "recent_out" || movementFilter === "out_today" || movementFilter === "out_week") {
+      compare = (a, b) => time(b.last_stock_out_at) - time(a.last_stock_out_at);
+    } else if (movementFilter === "recent_adjusted") {
+      compare = (a, b) => time(b.last_adjusted_at) - time(a.last_adjusted_at);
+    } else if (movementFilter) {
+      compare = (a, b) => time(b.last_stock_in_at) - time(a.last_stock_in_at);
+    } else if (dateFilter === "oldest") {
+      compare = (a, b) => time(a.product_created_at) - time(b.product_created_at);
+    } else if (dateFilter) {
+      compare = (a, b) => time(b.product_created_at) - time(a.product_created_at);
+    } else if (sortBy === "price") {
+      compare = (a, b) => (Number(a.selling_price) - Number(b.selling_price)) * dir;
+    } else if (sortBy === "stock") {
+      compare = (a, b) => (Number(a.stock_quantity) - Number(b.stock_quantity)) * dir;
+    } else {
+      compare = (a, b) => String(a.product_name || "").localeCompare(String(b.product_name || "")) * dir;
+    }
+    return [...list].sort(compare);
+  })();
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedItems = filteredItems.slice(pageStart, pageStart + pageSize);
+  const pageNumbers = (() => {
+    const first = Math.max(1, Math.min(currentPage - 2, totalPages - 4));
+    const last = Math.min(totalPages, first + 4);
+    return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+  })();
+
+  const activeFilterCount = [
+    dateFilter, movementFilter, brandFilter, supplierFilter,
+    minPrice, maxPrice, minStock, maxStock,
+  ].filter((value) => value !== "").length;
+
+  const clearFilters = () => {
+    setDateFilter("");
+    setMovementFilter("");
+    setBrandFilter("");
+    setSupplierFilter("");
+    setMinPrice("");
+    setMaxPrice("");
+    setMinStock("");
+    setMaxStock("");
   };
+
+  const sortLabel = (field) => {
+    const asc = sortDir === "asc";
+    if (field === "price") return asc ? "Price (low–high)" : "Price (high–low)";
+    if (field === "stock") return asc ? "Stock (low–high)" : "Stock (high–low)";
+    return asc ? "Name (A–Z)" : "Name (Z–A)";
+  };
+
+  // Back to page 1 whenever the result set changes.
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedCategory, statusFilter, dateFilter, movementFilter, brandFilter,
+      supplierFilter, minPrice, maxPrice, minStock, maxStock, sortBy, sortDir, pageSize]);
+
+  // Close the "..." row menu on outside click, scroll or resize.
+  useEffect(() => {
+    if (!rowMenu) return undefined;
+    const close = () => setRowMenu(null);
+    document.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [rowMenu]);
+
+  const openRowMenu = (event, item) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const openUp = rect.bottom + 200 > window.innerHeight;
+    const right = window.innerWidth - rect.right;
+    setRowMenu((current) =>
+      current?.item.inventory_id === item.inventory_id
+        ? null
+        : { item, right, ...(openUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) }
+    );
+  };
+
+  const isRowActive = (item) => item.is_active === true || Number(item.is_active) === 1;
+
+  const renderStatus = (item) => {
+    if (!isRowActive(item)) return <span className="status-badge">Inactive</span>;
+    if (Number(item.stock_quantity) <= 0) return <span className="status-badge danger">Out of Stock</span>;
+    if (Number(item.stock_quantity) <= Number(item.reorder_level || 0)) return <span className="status-badge warning">Low Stock</span>;
+    return <span className="status-badge success">In Stock</span>;
+  };
+
+  const renderRowActions = (item) => (
+    <div className="inv-row-actions">
+      <button type="button" className="inv-btn" onClick={() => setViewItem(item)}>
+        <i className="bi bi-eye" /> View
+      </button>
+      <button type="button" className="inv-btn" disabled={!isRowActive(item)} onClick={() => openEdit(item)}>
+        <i className="bi bi-pencil-square" /> Edit
+      </button>
+      <button type="button" className="inv-btn inv-more" aria-label="More actions" onClick={(event) => openRowMenu(event, item)}>
+        <i className="bi bi-three-dots" />
+      </button>
+    </div>
+  );
+
+  const renderCategoryBadge = (item) => (
+    <span className="inv-cat" style={categoryBadgeStyle(item.category_name)}>
+      {item.category_name || "Uncategorized"}
+    </span>
+  );
 
   // Open Stock In / Stock Out modal
   const openMovement = (item, type) => {
@@ -319,7 +557,8 @@ export default function Inventory() {
             }
 
             await stopQrScanner();
-            openMovement(item, type);
+            if (type === "SEARCH") setViewItem(item);
+            else openMovement(item, type);
           },
           () => {}
         );
@@ -525,10 +764,13 @@ export default function Inventory() {
           <p>Manage stock levels and inventory movements.</p>
         </div>
         <div className="inventory-quick-actions">
-          <button type="button" className="btn-success" onClick={() => startQrScanner("STOCK_IN")}>
+          <button type="button" className="inv-qr inv-qr-search" onClick={() => startQrScanner("SEARCH")}>
+            <i className="bi bi-qr-code-scan" /> QR Search
+          </button>
+          <button type="button" className="inv-qr inv-qr-in" onClick={() => startQrScanner("STOCK_IN")}>
             <i className="bi bi-qr-code-scan" /> QR Stock In
           </button>
-          <button type="button" className="btn-warning" onClick={() => startQrScanner("STOCK_OUT")}>
+          <button type="button" className="inv-qr inv-qr-out" onClick={() => startQrScanner("STOCK_OUT")}>
             <i className="bi bi-qr-code-scan" /> QR Stock Out
           </button>
         </div>
@@ -554,250 +796,269 @@ export default function Inventory() {
         </div>
       </div>
 
-      {/* Active / inactive inventory filters */}
-      <div className="inventory-status-filters" role="group" aria-label="Filter inventory by status" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "0 0 16px" }}>
-        {[{ value: "all", label: "All Items", count: items.length }, { value: "active", label: "Active", count: activeCount }, { value: "inactive", label: "Inactive", count: inactiveCount }].map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={statusFilter === option.value ? "btn-primary" : "btn-secondary"}
-            aria-pressed={statusFilter === option.value}
-            onClick={() => setStatusFilter(option.value)}
-            style={{ display: "inline-flex", alignItems: "center", gap: 8, borderRadius: 9, padding: "9px 13px", fontWeight: statusFilter === option.value ? 600 : 500 }}
-          >
-            {option.label}<span className="inventory-filter-count" style={{ opacity: 0.8 }}>{option.count}</span>
-          </button>
-        ))}
-      </div>
+      {error && <div className="error-message">{error}</div>}
+      {loading && <div className="loading-message">Loading...</div>}
 
-      {/* Search */}
-      <form className="search-bar inventory-search" onSubmit={handleSearch}>
-        <input
-          type="text"
-          placeholder="Search product, SKU, part number, brand, or barcode..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      {/* Toolbar: category, search, filters, status, view */}
+      <div className="inv-card inv-toolbar-card">
+        <div className="inv-toolbar">
+          <label className="inv-select">
+            <i className="bi bi-grid" />
+            <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} aria-label="Filter by category">
+              <option value="ALL">All Categories</option>
+              {categoryOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
 
-        <button type="submit">
-          Search
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setSearch("");
-            setTimeout(loadInventory, 0);
-          }}
-        >
-          Clear
-        </button>
-      </form>
-
-      {error && (
-        <div className="error-message">
-          {error}
-        </div>
-      )}
-
-      {loading && (
-        <div className="loading-message">
-          Loading...
-        </div>
-      )}
-
-      {/* Category browser and filtered inventory */}
-      <div
-        className="inventory-category-layout"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(190px, 240px) minmax(0, 1fr)",
-          gap: "18px",
-          alignItems: "start",
-        }}
-      >
-        <aside
-          className="inventory-category-sidebar"
-          style={{
-            border: "1px solid var(--line)",
-            borderRadius: "14px",
-            padding: "14px",
-            background: "var(--card, #fff)",
-            position: "sticky",
-            top: "16px",
-            maxHeight: "calc(100vh - 150px)",
-            overflowY: "auto",
-          }}
-        >
-          <h2 style={{ fontSize: "16px", margin: "0 0 12px" }}>Categories</h2>
-          <button
-            type="button"
-            onClick={() => setSelectedCategory("ALL")}
-            aria-pressed={selectedCategory === "ALL"}
-            style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              width: "100%", padding: "10px", marginBottom: "6px", borderRadius: "8px",
-              border: "1px solid var(--line)", cursor: "pointer", textAlign: "left",
-              background: selectedCategory === "ALL" ? "var(--surface-hover, #e9edf3)" : "transparent",
-              borderColor: selectedCategory === "ALL" ? "var(--line-strong, #cbd5e1)" : "var(--line)",
-              color: "var(--text, #263449)",
-              fontWeight: selectedCategory === "ALL" ? 500 : 400,
-            }}
-          >
-            <span><i className="bi bi-grid" /> All Items</span>
-            <span>{statusItems.length}</span>
-          </button>
-
-          {categoryOptions.map((categoryName) => {
-            const count = statusItems.filter(
-              (item) => (item.category_name || "Uncategorized").toLowerCase() === categoryName.toLowerCase()
-            ).length;
-            const active = selectedCategory.toLowerCase() === categoryName.toLowerCase();
-
-            return (
-              <button
-                key={categoryName}
-                type="button"
-                onClick={() => setSelectedCategory(categoryName)}
-                aria-pressed={active}
-                style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  gap: "8px", width: "100%", padding: "10px", marginBottom: "6px",
-                  borderRadius: "8px", border: "1px solid var(--line)", cursor: "pointer",
-                  textAlign: "left", background: active ? "var(--surface-hover, #e9edf3)" : "transparent",
-                  borderColor: active ? "var(--line-strong, #cbd5e1)" : "var(--line)",
-                  color: "var(--text, #263449)",
-                  fontWeight: active ? 500 : 400,
-                }}
-              >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  <i className="bi bi-folder2-open" /> {categoryName}
-                </span>
-                <span>{count}</span>
-              </button>
-            );
-          })}
-
-          {items.some((item) => !item.category_name) && (
-            <button
-              type="button"
-              onClick={() => setSelectedCategory("Uncategorized")}
-              aria-pressed={selectedCategory === "Uncategorized"}
-              style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                width: "100%", padding: "10px", marginBottom: "6px", borderRadius: "8px",
-                border: "1px solid var(--line)", cursor: "pointer", textAlign: "left",
-                background: selectedCategory === "Uncategorized" ? "var(--surface-hover, #e9edf3)" : "transparent",
-                borderColor: selectedCategory === "Uncategorized" ? "var(--line-strong, #cbd5e1)" : "var(--line)",
-                color: "var(--text, #263449)",
-                fontWeight: selectedCategory === "Uncategorized" ? 500 : 400,
-              }}
-            >
-              <span><i className="bi bi-folder" /> Uncategorized</span>
-              <span>{statusItems.filter((item) => !item.category_name).length}</span>
-            </button>
-          )}
-        </aside>
-
-        <section className="inventory-category-results" style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", margin: "0 0 12px", flexWrap: "wrap" }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: "20px" }}>
-                {selectedCategory === "ALL" ? (statusFilter === "all" ? "All Inventory Items" : `${statusFilter === "active" ? "Active" : "Inactive"} Inventory Items`) : selectedCategory}
-              </h2>
-              <p style={{ margin: "4px 0 0", color: "var(--muted, #64748b)", fontSize: "13px" }}>
-                Showing {visibleItems.length} {visibleItems.length === 1 ? "item" : "items"} · {statusFilter === "all" ? "all statuses" : `${statusFilter} only`}
-              </p>
-            </div>
-            {selectedCategory !== "ALL" && (
-              <button type="button" onClick={() => setSelectedCategory("ALL")}>
-                Clear category
+          <div className="inv-search">
+            <i className="bi bi-search" />
+            <input
+              type="text"
+              placeholder="Search product, SKU, brand, barcode..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button type="button" className="inv-search-clear" aria-label="Clear search" onClick={() => setSearch("")}>
+                <i className="bi bi-x-lg" />
               </button>
             )}
           </div>
 
-          <div className="table-container inventory-products-table-wrap">
-            <table className="data-table inventory-products-table">
+          <button type="button" className={`inv-btn inv-filter-toggle${showFilters ? " is-open" : ""}`} aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)}>
+            <i className="bi bi-sliders" /> Filters
+            {activeFilterCount > 0 && <span className="inv-count-dot">{activeFilterCount}</span>}
+          </button>
+
+          <div className="inv-pills" role="group" aria-label="Filter inventory by status">
+            {[
+              { value: "all", label: "All", count: items.length },
+              { value: "active", label: "Active", count: activeCount },
+              { value: "inactive", label: "Inactive", count: inactiveCount },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`inv-pill${statusFilter === option.value ? " active" : ""}`}
+                aria-pressed={statusFilter === option.value}
+                onClick={() => setStatusFilter(option.value)}
+              >
+                {option.label} ({option.count})
+              </button>
+            ))}
+          </div>
+
+          <div className="inv-view-toggle" role="group" aria-label="Switch view">
+            <button type="button" className={viewMode === "list" ? "active" : ""} aria-label="List view" onClick={() => setViewMode("list")}>
+              <i className="bi bi-list-ul" />
+            </button>
+            <button type="button" className={viewMode === "grid" ? "active" : ""} aria-label="Grid view" onClick={() => setViewMode("grid")}>
+              <i className="bi bi-grid-3x3-gap" />
+            </button>
+          </div>
+        </div>
+
+        {showFilters && (
+          <div className="inv-filter-panel">
+            <div className="inv-filter-grid">
+              <div className="inv-filter-group">
+                <h4>Product date</h4>
+                <div className="inv-chips">
+                  {DATE_FILTERS.map((option) => (
+                    <button key={option.value} type="button" className={`inv-chip${dateFilter === option.value ? " active" : ""}`}
+                      onClick={() => setDateFilter(dateFilter === option.value ? "" : option.value)}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="inv-filter-group">
+                <h4>Stock movement</h4>
+                <div className="inv-chips">
+                  {MOVEMENT_FILTERS.map((option) => (
+                    <button key={option.value} type="button" className={`inv-chip${movementFilter === option.value ? " active" : ""}`}
+                      onClick={() => setMovementFilter(movementFilter === option.value ? "" : option.value)}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="inv-filter-group">
+                <h4>Other filters</h4>
+                <div className="inv-field-row">
+                  <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)} aria-label="Brand">
+                    <option value="">All brands</option>
+                    {brandOptions.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+                  </select>
+                  <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} aria-label="Supplier">
+                    <option value="">All suppliers</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.supplier_name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="inv-field-row">
+                  <input type="number" min="0" placeholder="Min price (₱)" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
+                  <input type="number" min="0" placeholder="Max price (₱)" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
+                </div>
+                <div className="inv-field-row">
+                  <input type="number" min="0" placeholder="Min stock" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
+                  <input type="number" min="0" placeholder="Max stock" value={maxStock} onChange={(e) => setMaxStock(e.target.value)} />
+                </div>
+              </div>
+            </div>
+            <div className="inv-filter-actions">
+              <button type="button" className="inv-btn" onClick={clearFilters} disabled={activeFilterCount === 0}>
+                <i className="bi bi-x-circle" /> Clear all filters
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Product list */}
+      <div className="inv-card">
+        <div className="inv-list-head">
+          <h2><i className="bi bi-box-seam" /> Products ({filteredItems.length})</h2>
+          <div className="inv-sort">
+            <span>Sort by:</span>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort by">
+              <option value="name">{sortLabel("name")}</option>
+              <option value="price">{sortLabel("price")}</option>
+              <option value="stock">{sortLabel("stock")}</option>
+            </select>
+            <button type="button" className="inv-icon-btn" aria-label="Toggle sort direction" onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}>
+              <i className={`bi bi-arrow-${sortDir === "asc" ? "up" : "down"}`} />
+            </button>
+          </div>
+        </div>
+
+        {filteredItems.length === 0 ? (
+          <div className="inv-empty">
+            {items.length === 0 ? "No inventory found." : "No products match your search or filters."}
+          </div>
+        ) : viewMode === "list" ? (
+          <div className="inv-table-wrap">
+            <table className="inv-table">
               <thead>
                 <tr>
                   <th>Product</th>
-                  <th>SKU / Part No.</th>
+                  <th>Brand</th>
+                  <th>Category</th>
                   <th>Price</th>
                   <th>Stock</th>
                   <th>Status</th>
-                  <th className="inventory-actions-column">Actions</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleItems.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="empty-state">
-                      {selectedCategory === "ALL"
-                        ? "No inventory found."
-                        : `No items found in ${selectedCategory}.`}
+                {pagedItems.map((item) => (
+                  <tr key={item.inventory_id}>
+                    <td>
+                      <div className="inv-product">
+                        <ProductThumbnail item={item} />
+                        <div>
+                          <strong>{item.product_name || "Unnamed product"}</strong>
+                          <span>{item.brand || item.category_name || "Motorcycle part"}</span>
+                        </div>
+                      </div>
                     </td>
+                    <td>{item.brand || "—"}</td>
+                    <td>{renderCategoryBadge(item)}</td>
+                    <td className="inv-strong">{formatPeso(item.selling_price)}</td>
+                    <td className="inv-strong">{item.stock_quantity ?? 0}</td>
+                    <td>{renderStatus(item)}</td>
+                    <td>{renderRowActions(item)}</td>
                   </tr>
-                ) : (
-                  visibleItems.map((item) => (
-                    <tr key={item.inventory_id}>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 190 }}>
-                          <ProductThumbnail item={item} />
-                          <div style={{ minWidth: 0 }}>
-                            <strong style={{ display: "block", overflowWrap: "anywhere" }}>{item.product_name || "Unnamed product"}</strong>
-                            <span style={{ display: "block", marginTop: 4, color: "var(--muted, #64748b)", fontSize: 12 }}>
-                              {item.brand || item.category_name || "Motorcycle part"}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <span>{item.sku || item.part_number || "-"}</span>
-                        {item.sku && item.part_number && (
-                          <small style={{ display: "block", marginTop: 4, color: "var(--muted, #64748b)" }}>Part: {item.part_number}</small>
-                        )}
-                      </td>
-                      <td>₱{Number(item.selling_price || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td>
-                        <strong>{item.stock_quantity ?? 0}</strong>
-                        <small style={{ display: "block", marginTop: 4, color: "var(--muted, #64748b)" }}>Min: {item.reorder_level ?? 0}</small>
-                      </td>
-                      <td>
-                        {!(item.is_active === true || Number(item.is_active) === 1) ? (
-                          <span className="status-badge">Inactive</span>
-                        ) : Number(item.stock_quantity) <= 0 ? (
-                          <span className="status-badge danger">Out of Stock</span>
-                        ) : Number(item.stock_quantity) <= Number(item.reorder_level || 0) ? (
-                          <span className="status-badge warning">Low Stock</span>
-                        ) : (
-                          <span className="status-badge success">In Stock</span>
-                        )}
-                      </td>
-                      <td className="inventory-actions-column">
-                        <div className="action-buttons">
-                          {(item.is_active === true || Number(item.is_active) === 1) ? (
-                            <>
-                              <button type="button" className="btn-success" onClick={() => openMovement(item, "STOCK_IN")}>Stock In</button>
-                              <button type="button" className="btn-warning" onClick={() => openMovement(item, "STOCK_OUT")}>Stock Out</button>
-                              <button type="button" className="btn-primary" onClick={() => openEdit(item)}>Adjust</button>
-                              <button type="button" className="btn-danger" onClick={() => deactivateItem(item)}>Deactivate</button>
-                            </>
-                          ) : (
-                            <>
-                              <button type="button" className="btn-primary" onClick={() => restoreItem(item)}>Restore</button>
-                              <button type="button" className="btn-danger" onClick={() => permanentlyDeleteItem(item)}>Delete</button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
-        </section>
+        ) : (
+          <div className="inv-grid">
+            {pagedItems.map((item) => (
+              <div key={item.inventory_id} className="inv-grid-card">
+                <div className="inv-grid-top">
+                  <ProductThumbnail item={item} />
+                  {renderStatus(item)}
+                </div>
+                <strong>{item.product_name || "Unnamed product"}</strong>
+                <span className="inv-sub">{item.brand || "—"}</span>
+                {renderCategoryBadge(item)}
+                <div className="inv-grid-meta">
+                  <b>{formatPeso(item.selling_price)}</b>
+                  <span>Stock: {item.stock_quantity ?? 0}</span>
+                </div>
+                {renderRowActions(item)}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="inv-footer">
+          <span>
+            {filteredItems.length
+              ? `Showing ${pageStart + 1}–${Math.min(pageStart + pageSize, filteredItems.length)} of ${filteredItems.length} products`
+              : "Showing 0 products"}
+          </span>
+          <div className="inv-pager">
+            <button type="button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
+              <i className="bi bi-arrow-left" />
+            </button>
+            {pageNumbers.map((number) => (
+              <button key={number} type="button" className={number === currentPage ? "active" : ""} onClick={() => setPage(number)}>
+                {number}
+              </button>
+            ))}
+            <button type="button" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
+              <i className="bi bi-arrow-right" />
+            </button>
+          </div>
+        </div>
+        <div className="inv-footer inv-footer-sub">
+          <label className="inv-per-page">
+            Show
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+              {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+            per page
+          </label>
+        </div>
       </div>
+
+      {/* "..." row menu */}
+      {rowMenu && (
+        <div
+          className="inv-row-menu"
+          style={{ top: rowMenu.top, bottom: rowMenu.bottom, right: rowMenu.right }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {isRowActive(rowMenu.item) ? (
+            <>
+              <button type="button" onClick={() => { const it = rowMenu.item; setRowMenu(null); openMovement(it, "STOCK_IN"); }}>
+                <i className="bi bi-box-arrow-in-down" /> Stock In
+              </button>
+              <button type="button" onClick={() => { const it = rowMenu.item; setRowMenu(null); openMovement(it, "STOCK_OUT"); }}>
+                <i className="bi bi-box-arrow-up" /> Stock Out
+              </button>
+              <button type="button" className="danger" onClick={() => { const it = rowMenu.item; setRowMenu(null); deactivateItem(it); }}>
+                <i className="bi bi-slash-circle" /> Deactivate
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={() => { const it = rowMenu.item; setRowMenu(null); restoreItem(it); }}>
+                <i className="bi bi-arrow-counterclockwise" /> Restore
+              </button>
+              <button type="button" className="danger" onClick={() => { const it = rowMenu.item; setRowMenu(null); permanentlyDeleteItem(it); }}>
+                <i className="bi bi-trash" /> Delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ============================= */}
       {/* STOCK IN / STOCK OUT MODAL */}
@@ -1000,13 +1261,50 @@ export default function Inventory() {
         </div>
       )}
 
+      {viewItem && (
+        <div className="inventory-modal-overlay" onClick={() => setViewItem(null)}>
+          <div className="inventory-modal inv-view-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div className="inv-product">
+                <ProductThumbnail item={viewItem} />
+                <div>
+                  <h2>{viewItem.product_name}</h2>
+                  <span className="inv-sub">{viewItem.brand || "—"}</span>
+                </div>
+              </div>
+              <button type="button" className="secondary" onClick={() => setViewItem(null)}>Close</button>
+            </div>
+            <dl className="inv-detail-grid">
+              <div><dt>SKU</dt><dd>{viewItem.sku || "—"}</dd></div>
+              <div><dt>Part number</dt><dd>{viewItem.part_number || "—"}</dd></div>
+              <div><dt>Barcode</dt><dd>{viewItem.barcode || "—"}</dd></div>
+              <div><dt>Category</dt><dd>{renderCategoryBadge(viewItem)}</dd></div>
+              <div><dt>Price</dt><dd>{formatPeso(viewItem.selling_price)}</dd></div>
+              <div><dt>Status</dt><dd>{renderStatus(viewItem)}</dd></div>
+              <div><dt>Stock</dt><dd>{viewItem.stock_quantity ?? 0}</dd></div>
+              <div><dt>Minimum stock</dt><dd>{viewItem.reorder_level ?? 0}</dd></div>
+              <div><dt>Added on</dt><dd>{formatDateTime(viewItem.product_created_at)}</dd></div>
+              <div><dt>Last stock in</dt><dd>{formatDateTime(viewItem.last_stock_in_at)}</dd></div>
+              <div><dt>Last stock out</dt><dd>{formatDateTime(viewItem.last_stock_out_at)}</dd></div>
+              <div><dt>Last adjusted</dt><dd>{formatDateTime(viewItem.last_adjusted_at)}</dd></div>
+            </dl>
+            {isRowActive(viewItem) && (
+              <div className="modal-actions">
+                <button type="button" className="inv-qr inv-qr-in" onClick={() => { const it = viewItem; setViewItem(null); openMovement(it, "STOCK_IN"); }}>Stock In</button>
+                <button type="button" className="inv-qr inv-qr-out" onClick={() => { const it = viewItem; setViewItem(null); openMovement(it, "STOCK_OUT"); }}>Stock Out</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {qrScannerOpen && (
         <div className="inventory-modal-overlay" onClick={stopQrScanner}>
           <div className="inventory-modal qr-scanner-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-qr-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h2 id="inventory-qr-title">{qrMovementType === "STOCK_IN" ? "Scan for Stock In" : "Scan for Stock Out"}</h2>
-                <p className="modal-help">Scan a product QR label to open its stock movement form.</p>
+                <h2 id="inventory-qr-title">{qrMovementType === "SEARCH" ? "QR Search" : qrMovementType === "STOCK_IN" ? "Scan for Stock In" : "Scan for Stock Out"}</h2>
+                <p className="modal-help">{qrMovementType === "SEARCH" ? "Scan a product QR label to open its details." : "Scan a product QR label to open its stock movement form."}</p>
               </div>
               <button type="button" className="secondary" onClick={stopQrScanner}>Close</button>
             </div>

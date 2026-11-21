@@ -6,14 +6,14 @@
 .audit-logs-page .audit-logs-toolbar{gap:12px;margin:20px 0 22px}
 .audit-logs-page .audit-logs-toolbar label{font-size:14px;font-weight:650}
 .audit-logs-page .audit-logs-toolbar select{min-height:42px;font-size:14px}
-.audit-logs-page .audit-logs-table{min-width:1080px}
-.audit-logs-page .audit-logs-table th{padding:15px 16px!important;font-size:13px!important;letter-spacing:.35px}
-.audit-logs-page .audit-logs-table td{padding:17px 16px!important;font-size:16px!important;line-height:1.5}
+.audit-logs-page .audit-logs-table{min-width:960px}
+.audit-logs-page .audit-logs-table th{padding:13px 12px!important;font-size:13px!important;letter-spacing:.35px}
+.audit-logs-page .audit-logs-table td{padding:13px 12px!important;font-size:15px!important;line-height:1.5}
 .audit-logs-page .audit-logs-table td:first-child{white-space:nowrap;font-variant-numeric:tabular-nums}
-.audit-logs-page .audit-logs-table .audit-description{min-width:300px;max-width:560px}
+.audit-logs-page .audit-logs-table .audit-description{min-width:240px;max-width:560px}
 .audit-logs-page .audit-source-pill,.audit-logs-page .audit-action-pill{padding:6px 10px;font-size:13px;font-weight:650}
 @media(max-width:700px){
   .audit-logs-page .audit-logs-header h1{font-size:30px!important}
   .audit-logs-page .audit-logs-header p{font-size:14px!important}
-  .audit-logs-page .audit-logs-table{min-width:1000px}
+  .audit-logs-page .audit-logs-table{min-width:960px}
 }

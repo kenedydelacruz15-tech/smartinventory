@@ -7,7 +7,6 @@ from backend.audit_logger import create_audit_log
 from backend.routes.user_routes import role_required
 from backend.database import get_db_connection
 from backend.services.stock_out_schema import (
-    ensure_stock_out_store_foreign_key,
     stock_out_error_message,
 )
 
@@ -103,8 +102,6 @@ def create_stock_out():
 
     try:
         connection = get_db_connection()
-
-        ensure_stock_out_store_foreign_key(connection)
 
         connection.start_transaction()
 
